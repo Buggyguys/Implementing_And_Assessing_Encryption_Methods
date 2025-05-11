@@ -1,0 +1,4 @@
+venv
+src/ui/__pycache__/
+src/ui/tabs/__pycache__/
+
