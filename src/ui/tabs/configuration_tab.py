@@ -17,6 +17,75 @@ from PyQt6.QtWidgets import (
     QGridLayout, QTabWidget, QMainWindow
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
+from PyQt6.QtWidgets import QApplication
+
+
+class OrchestrationThread(QThread):
+    """Thread to run the orchestrator without blocking the UI."""
+    
+    progress_update = pyqtSignal(str)
+    orchestration_complete = pyqtSignal(bool, str)  # Success flag and message
+    
+    def __init__(self, orchestrator_func):
+        super().__init__()
+        self.orchestrator_func = orchestrator_func
+        self.running = False
+        self.success = False
+        self.error_message = ""
+        # Set this as a daemon thread (will be killed when main thread exits)
+        self.setTerminationEnabled(True)
+    
+    def run(self):
+        """Execute the orchestrator."""
+        try:
+            # Set running flag
+            self.running = True
+            
+            # Redirect logging to capture progress
+            self._setup_logging()
+            
+            # Run the orchestrator
+            self.progress_update.emit("Starting orchestration process...")
+            result = self.orchestrator_func()
+            self.success = result is True
+            
+            if self.success:
+                self.progress_update.emit("Orchestration completed successfully!")
+                self.orchestration_complete.emit(True, "Orchestration completed successfully")
+            else:
+                self.progress_update.emit("Orchestration completed with errors")
+                self.orchestration_complete.emit(False, "Orchestration completed with errors")
+        except Exception as e:
+            print(f"Orchestration error in thread: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.error_message = str(e)
+            self.progress_update.emit(f"Error: {str(e)}")
+            self.orchestration_complete.emit(False, f"Error: {str(e)}")
+        finally:
+            # Always make sure to reset running flag
+            self.running = False
+    
+    def _setup_logging(self):
+        """Redirect logging to emit progress updates."""
+        import logging
+        
+        class SignalHandler(logging.Handler):
+            def __init__(self, signal):
+                super().__init__()
+                self.signal = signal
+            
+            def emit(self, record):
+                msg = self.format(record)
+                self.signal.emit(msg)
+        
+        # Get the orchestrator logger
+        logger = logging.getLogger("Orchestrator")
+        
+        # Add our custom handler
+        handler = SignalHandler(self.progress_update)
+        handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        logger.addHandler(handler)
 
 
 class ConfigurationTab(QWidget):
@@ -29,6 +98,7 @@ class ConfigurationTab(QWidget):
         
         # Initialize member variables
         self.config_path = None
+        self.orchestrator_thread = None  # Store thread reference
         
         # Set up the UI
         self._setup_ui()
@@ -131,11 +201,6 @@ class ConfigurationTab(QWidget):
         test_params_group = QGroupBox("Test Parameters")
         test_params_layout = QFormLayout()
         
-        # RAM Usage Limit
-        self.ram_limit_combo = QComboBox()
-        self.ram_limit_combo.addItems(["500MB", "1GB", "2GB", "4GB", "8GB", "16GB", "32GB", "Uncapped"])
-        test_params_layout.addRow("RAM Usage Limit:", self.ram_limit_combo)
-        
         # Respect Sentences
         self.respect_sentences_check = QCheckBox()
         test_params_layout.addRow("Respect Sentences:", self.respect_sentences_check)
@@ -174,11 +239,25 @@ class ConfigurationTab(QWidget):
         # Set layout for buttons group
         buttons_group.setLayout(buttons_layout)
         
+        # Progress Group (new)
+        progress_group = QGroupBox("Progress")
+        progress_layout = QVBoxLayout()
+        
+        # Progress text area
+        self.progress_text = QLabel("Ready")
+        self.progress_text.setMinimumHeight(80)
+        self.progress_text.setWordWrap(True)
+        progress_layout.addWidget(self.progress_text)
+        
+        # Set layout for progress group
+        progress_group.setLayout(progress_layout)
+        
         # Add groups to scroll layout
         scroll_layout.addWidget(languages_group)
         scroll_layout.addWidget(methods_group)
         scroll_layout.addWidget(test_params_group)
         scroll_layout.addWidget(buttons_group)
+        scroll_layout.addWidget(progress_group)  # Add the progress group
         
         # Add spacing
         scroll_layout.addStretch()
@@ -246,7 +325,7 @@ class ConfigurationTab(QWidget):
                 }
             },
             "test_parameters": {
-                "ram_limit": self.ram_limit_combo.currentText(),
+                "ram_limit": 0,  # Always 0 (unlimited)
                 "respect_sentences": self.respect_sentences_check.isChecked(),
                 "include_stdlibs": self.include_stdlibs_check.isChecked(),
                 "iterations": self.iterations_spin.value()
@@ -311,7 +390,7 @@ class ConfigurationTab(QWidget):
                 self.mlkem_param_combo.setCurrentText(config["encryption_methods"]["mlkem"]["param_set"])
                 
                 # Test parameters
-                self.ram_limit_combo.setCurrentText(config["test_parameters"]["ram_limit"])
+                # RAM limit is no longer used
                 self.respect_sentences_check.setChecked(config["test_parameters"]["respect_sentences"])
                 self.include_stdlibs_check.setChecked(config["test_parameters"]["include_stdlibs"])
                 self.iterations_spin.setValue(config["test_parameters"]["iterations"])
@@ -324,6 +403,32 @@ class ConfigurationTab(QWidget):
     
     def _start_tests(self):
         """Start the benchmarking tests."""
+        # Check if an orchestration is already running
+        if self.orchestrator_thread and self.orchestrator_thread.isRunning():
+            # Ask the user if they want to stop the current run
+            reply = QMessageBox.question(
+                self,
+                "Orchestration in Progress",
+                "An orchestration process is already running. Do you want to stop it and start a new one?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Properly terminate the thread
+                self.orchestrator_thread.terminate()
+                self.orchestrator_thread.wait(3000)  # Wait up to 3 seconds for clean termination
+                
+                # Clean up any temporary files
+                for file in os.listdir(os.getcwd()):
+                    if file.startswith("session-") and file.endswith(".json"):
+                        try:
+                            os.remove(os.path.join(os.getcwd(), file))
+                        except:
+                            pass
+            else:
+                return
+        
         # Check if at least one language is selected
         if not any([
             self.lang_python_check.isChecked(),
@@ -383,69 +488,90 @@ class ConfigurationTab(QWidget):
         # Format timestamp for human readability
         now = datetime.now()
         timestamp = now.strftime("%Y%m%d_%H%M%S")  # Keep original format for internal use
-        human_timestamp = now.strftime("%d.%m.%y-%H:%M:%S")  # New human-readable format - Fix month format
+        human_timestamp = now.strftime("%d.%m.%Y-%H:%M:%S")  # Updated format with 4-digit year
+        
+        # Create sessions directory if it doesn't exist
+        sessions_dir = os.path.join(os.getcwd(), "sessions")
+        os.makedirs(sessions_dir, exist_ok=True)
         
         # Create session directory with new format
-        session_dir = os.path.join(os.getcwd(), f"Session-{human_timestamp}")
+        session_dir = os.path.join(sessions_dir, f"Session-{human_timestamp}")
         os.makedirs(session_dir, exist_ok=True)
         os.makedirs(os.path.join(session_dir, "results"), exist_ok=True)
         
         # Collect PC specifications
         pc_specs = self._collect_pc_specs()
         
-        # Save current configuration to session directory
+        # Create config dictionary (enhanced with new fields)
+        config = {
+            "languages": {
+                "python": {
+                    "is_enabled": self.lang_python_check.isChecked()
+                },
+                "c": {
+                    "is_enabled": self.lang_c_check.isChecked()
+                },
+                "rust": {
+                    "is_enabled": self.lang_rust_check.isChecked()
+                },
+                "go": {
+                    "is_enabled": self.lang_go_check.isChecked()
+                },
+                "assembly": {
+                    "is_enabled": self.lang_assembly_check.isChecked()
+                }
+            },
+            "encryption_methods": {
+                "aes": {
+                    "enabled": self.aes_check.isChecked(),
+                    "key_size": self.aes_key_size_combo.currentText()
+                },
+                "chacha20": {
+                    "enabled": self.chacha_check.isChecked()
+                },
+                "rsa": {
+                    "enabled": self.rsa_check.isChecked(),
+                    "key_size": self.rsa_key_size_combo.currentText()
+                },
+                "ecc": {
+                    "enabled": self.ecc_check.isChecked(),
+                    "curve": self.ecc_curve_combo.currentText()
+                },
+                "mlkem": {
+                    "enabled": self.mlkem_check.isChecked(),
+                    "param_set": self.mlkem_param_combo.currentText()
+                }
+            },
+            "test_parameters": {
+                "ram_limit": 0,  # Always set to 0 (unlimited)
+                "respect_sentences": self.respect_sentences_check.isChecked(),
+                "include_stdlibs": self.include_stdlibs_check.isChecked(),
+                "iterations": self.iterations_spin.value(),
+                "dataset_path": dataset_path,
+            },
+            "session_info": {
+                "timestamp": timestamp,
+                "human_timestamp": human_timestamp,
+                "session_dir": session_dir,
+                "session_id": f"Session-{human_timestamp}"
+            },
+            "dataset_info": dataset_info,
+            "dataset_sample": dataset_sample,
+            "pc_specifications": pc_specs
+        }
+        
+        # Save configuration as session JSON in project root (for orchestrator to find)
+        session_json_path = os.path.join(os.getcwd(), f"session-{timestamp}.json")
+        with open(session_json_path, "w") as f:
+            json.dump(config, f, indent=4)
+        
+        # Also save a copy in the session directory
         config_path = os.path.join(session_dir, "test_config.json")
         with open(config_path, "w") as f:
-            # Create config dictionary (enhanced with new fields)
-            config = {
-                "languages": {
-                    "python": self.lang_python_check.isChecked(),
-                    "c": self.lang_c_check.isChecked(),
-                    "rust": self.lang_rust_check.isChecked(),
-                    "go": self.lang_go_check.isChecked(),
-                    "assembly": self.lang_assembly_check.isChecked()
-                },
-                "encryption_methods": {
-                    "aes": {
-                        "enabled": self.aes_check.isChecked(),
-                        "key_size": self.aes_key_size_combo.currentText()
-                    },
-                    "chacha20": {
-                        "enabled": self.chacha_check.isChecked()
-                    },
-                    "rsa": {
-                        "enabled": self.rsa_check.isChecked(),
-                        "key_size": self.rsa_key_size_combo.currentText()
-                    },
-                    "ecc": {
-                        "enabled": self.ecc_check.isChecked(),
-                        "curve": self.ecc_curve_combo.currentText()
-                    },
-                    "mlkem": {
-                        "enabled": self.mlkem_check.isChecked(),
-                        "param_set": self.mlkem_param_combo.currentText()
-                    }
-                },
-                "test_parameters": {
-                    "ram_limit": self.ram_limit_combo.currentText(),
-                    "respect_sentences": self.respect_sentences_check.isChecked(),
-                    "include_stdlibs": self.include_stdlibs_check.isChecked(),
-                    "iterations": self.iterations_spin.value(),
-                    "dataset_path": dataset_path,
-                },
-                "session_info": {
-                    "timestamp": timestamp,
-                    "human_timestamp": human_timestamp,
-                    "session_dir": session_dir
-                },
-                "dataset_info": dataset_info,
-                "dataset_sample": dataset_sample,
-                "pc_specifications": pc_specs
-            }
             json.dump(config, f, indent=4)
         
         # Emit signal to indicate tests are starting
-        self.status_message.emit(f"Starting tests with configuration from {config_path}")
+        self.status_message.emit(f"Starting tests with configuration from {session_json_path}")
         
         # Notify user
         QMessageBox.information(
@@ -455,6 +581,44 @@ class ConfigurationTab(QWidget):
             f"Session directory: {session_dir}\n\n"
             f"Results will be available in the Results Viewer tab when complete."
         )
+        
+        # Automatically run the orchestrator
+        try:
+            # Import and run the orchestrator
+            from src.orchestrator import main as run_orchestrator
+            self.status_message.emit("Launching orchestrator...")
+            self.progress_text.setText("Preparing benchmark...")
+            
+            # Run in a separate thread to avoid blocking the UI
+            self.orchestrator_thread = OrchestrationThread(run_orchestrator)
+            
+            # Connect signals
+            self.orchestrator_thread.finished.connect(self._orchestration_finished)
+            self.orchestrator_thread.orchestration_complete.connect(self._orchestration_completed)
+            
+            # Connect progress updates to UI
+            self.orchestrator_thread.progress_update.connect(self._update_progress)
+            
+            # Start the thread
+            self.orchestrator_thread.start()
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Orchestration Error",
+                f"Failed to start orchestrator: {str(e)}\n\n"
+                f"You may need to run it manually with:\n"
+                f"python -m src.orchestrator"
+            )
+            self.status_message.emit(f"Orchestration error: {str(e)}")
+            self.progress_text.setText(f"Error: {str(e)}")
+    
+    def _update_progress(self, message):
+        """Update the progress display with new information."""
+        # Simply set the latest message - simpler than trying to maintain multiple lines
+        self.progress_text.setText(message)
+        
+        # Process events to ensure UI updates
+        QApplication.processEvents()
 
     def _collect_pc_specs(self):
         """Collect information about the system."""
@@ -648,4 +812,46 @@ class ConfigurationTab(QWidget):
                     return " ... ".join(samples)
                     
         except Exception as e:
-            return f"Could not read sample from dataset: {str(e)}" 
+            return f"Could not read sample from dataset: {str(e)}"
+
+    def _generate_test_params(self):
+        """Generate test parameters from current UI state."""
+        # Get RAM limit (convert to MB for config)
+        ram_limit_str = self.ram_limit_combo.currentText()
+        ram_limit_mb = 0  # Default to unlimited (Uncapped)
+        
+        if ram_limit_str != "Uncapped":
+            if ram_limit_str.endswith("MB"):
+                ram_limit_mb = int(ram_limit_str.replace("MB", ""))
+            elif ram_limit_str.endswith("GB"):
+                ram_limit_mb = int(ram_limit_str.replace("GB", "")) * 1024
+        
+        # Rest of the method remains unchanged
+        return {
+            "iterations": self.iterations_spin.value(),
+            "ram_limit": ram_limit_mb,
+            "respect_sentences": self.respect_sentences_check.isChecked(),
+            "include_stdlibs": self.include_stdlibs_check.isChecked(),
+            "dataset_path": self.dataset_combo.currentData()
+        }
+
+    def _orchestration_finished(self):
+        """Handle thread finished signal (always called)."""
+        # Clean up any temporary files
+        for file in os.listdir(os.getcwd()):
+            if file.startswith("session-") and file.endswith(".json"):
+                try:
+                    os.remove(os.path.join(os.getcwd(), file))
+                except:
+                    pass
+
+    def _orchestration_completed(self, success, message):
+        """Handle orchestration completion."""
+        if success:
+            self.status_message.emit("Orchestration completed successfully. Check results tab.")
+            QMessageBox.information(self, "Orchestration Complete", 
+                                   "Benchmarking completed successfully.\n\nResults are now available in the Results tab.")
+        else:
+            self.status_message.emit(f"Orchestration error: {message}")
+            QMessageBox.warning(self, "Orchestration Error", 
+                               f"Benchmarking encountered an error:\n\n{message}") 

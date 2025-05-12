@@ -1,4 +1,9 @@
 venv
+src/__pycache__/
 src/ui/__pycache__/
 src/ui/tabs/__pycache__/
+src/datasets/
+src/encryption/python/__pycache__/
+sessions/
+
 

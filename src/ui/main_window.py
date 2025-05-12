@@ -83,3 +83,20 @@ class MainWindow(QMainWindow):
     def _update_status(self, message):
         """Update status bar message."""
         self.status_message.setText(message) 
+        
+    def closeEvent(self, event):
+        """Handle application close event."""
+        # Check if any orchestration threads are running
+        if hasattr(self.configuration_tab, 'orchestrator_thread') and self.configuration_tab.orchestrator_thread and self.configuration_tab.orchestrator_thread.isRunning():
+            # Wait for thread to finish with a timeout
+            self.status_message.setText("Waiting for orchestration to complete...")
+            self.configuration_tab.orchestrator_thread.quit()
+            finished = self.configuration_tab.orchestrator_thread.wait(3000)  # 3 second timeout
+            
+            if not finished:
+                # If not finished, force termination
+                self.configuration_tab.orchestrator_thread.terminate()
+                self.configuration_tab.orchestrator_thread.wait()
+        
+        # Accept the close event
+        event.accept() 
