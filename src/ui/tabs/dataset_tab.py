@@ -530,8 +530,14 @@ class DatasetGenerationWorker(QThread):
         try:
             start_time = time.time()
             
-            # Check if the dataset directory exists
-            dataset_dir = os.path.join("src", "datasets")
+            # Use the absolute path to the datasets directory
+            project_root = os.getcwd()
+            
+            # When running from src directory, go up one level
+            if os.path.basename(project_root) == "src":
+                project_root = os.path.dirname(project_root)
+                
+            dataset_dir = os.path.join(project_root, "src", "datasets")
             os.makedirs(dataset_dir, exist_ok=True)
             
             # Create a filename based on parameters
@@ -1263,8 +1269,15 @@ class DatasetTab(QWidget):
         self.datasets_list.clear()
         self.datasets_list.addItem("-- Select a dataset --")
         
-        # Check if the dataset directory exists
-        dataset_dir = os.path.join("src", "datasets")
+        # Use the absolute path to the datasets directory
+        project_root = os.getcwd()
+        
+        # When running from src directory, go up one level
+        if os.path.basename(project_root) == "src":
+            project_root = os.path.dirname(project_root)
+            
+        dataset_dir = os.path.join(project_root, "src", "datasets")
+        
         if not os.path.exists(dataset_dir):
             os.makedirs(dataset_dir, exist_ok=True)
             return

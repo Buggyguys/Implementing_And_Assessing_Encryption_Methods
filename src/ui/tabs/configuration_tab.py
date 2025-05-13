@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt6.QtWidgets import QApplication
+import subprocess
 
 
 class OrchestrationThread(QThread):
@@ -148,13 +149,27 @@ class ConfigurationTab(QWidget):
         self.aes_key_size_combo = QComboBox()
         self.aes_key_size_combo.addItems(["128", "192", "256"])
         aes_layout.addWidget(self.aes_key_size_combo)
+        
+        aes_layout.addWidget(QLabel("Mode:"))
+        self.aes_mode_combo = QComboBox()
+        self.aes_mode_combo.addItems(["CBC", "CTR", "GCM", "ECB"])
+        self.aes_mode_combo.setCurrentText("GCM")  # GCM is recommended default
+        aes_layout.addWidget(self.aes_mode_combo)
+        
         aes_layout.addStretch()
         methods_layout.addLayout(aes_layout)
         
         # ChaCha20
         chacha_layout = QHBoxLayout()
-        self.chacha_check = QCheckBox("ChaCha20-Poly1305")
+        self.chacha_check = QCheckBox("ChaCha20")
         chacha_layout.addWidget(self.chacha_check)
+        
+        chacha_layout.addWidget(QLabel("Mode:"))
+        self.chacha_mode_combo = QComboBox()
+        self.chacha_mode_combo.addItems(["ChaCha20", "ChaCha20-Poly1305"])
+        self.chacha_mode_combo.setCurrentText("ChaCha20-Poly1305")  # Default to ChaCha20-Poly1305
+        chacha_layout.addWidget(self.chacha_mode_combo)
+        
         chacha_layout.addStretch()
         methods_layout.addLayout(chacha_layout)
         
@@ -182,17 +197,24 @@ class ConfigurationTab(QWidget):
         ecc_layout.addStretch()
         methods_layout.addLayout(ecc_layout)
         
-        # ML-KEM
-        mlkem_layout = QHBoxLayout()
-        self.mlkem_check = QCheckBox("ML-KEM")
-        mlkem_layout.addWidget(self.mlkem_check)
+        # Twofish (replacing ML-KEM)
+        twofish_layout = QHBoxLayout()
+        self.twofish_check = QCheckBox("Twofish")
+        twofish_layout.addWidget(self.twofish_check)
         
-        mlkem_layout.addWidget(QLabel("Parameter Set:"))
-        self.mlkem_param_combo = QComboBox()
-        self.mlkem_param_combo.addItems(["ML-KEM-512", "ML-KEM-768", "ML-KEM-1024"])
-        mlkem_layout.addWidget(self.mlkem_param_combo)
-        mlkem_layout.addStretch()
-        methods_layout.addLayout(mlkem_layout)
+        twofish_layout.addWidget(QLabel("Key Size:"))
+        self.twofish_key_size_combo = QComboBox()
+        self.twofish_key_size_combo.addItems(["128", "192", "256"])
+        twofish_layout.addWidget(self.twofish_key_size_combo)
+        
+        twofish_layout.addWidget(QLabel("Mode:"))
+        self.twofish_mode_combo = QComboBox()
+        self.twofish_mode_combo.addItems(["CBC", "CTR", "GCM", "ECB"])
+        self.twofish_mode_combo.setCurrentText("GCM")  # GCM is recommended default
+        twofish_layout.addWidget(self.twofish_mode_combo)
+        
+        twofish_layout.addStretch()
+        methods_layout.addLayout(twofish_layout)
         
         # Set layout for methods group
         methods_group.setLayout(methods_layout)
@@ -200,6 +222,23 @@ class ConfigurationTab(QWidget):
         # Test Parameters group
         test_params_group = QGroupBox("Test Parameters")
         test_params_layout = QFormLayout()
+        
+        # Processing Strategy
+        strategy_layout = QHBoxLayout()
+        self.processing_strategy_combo = QComboBox()
+        self.processing_strategy_combo.addItems(["Memory", "Stream"])
+        self.processing_strategy_combo.setToolTip("Memory: Process entire dataset in memory\nStream: Process dataset in chunks")
+        strategy_layout.addWidget(QLabel("Processing Strategy:"))
+        strategy_layout.addWidget(self.processing_strategy_combo)
+        
+        # Chunk Size (only relevant for Stream processing)
+        strategy_layout.addWidget(QLabel("Chunk Size:"))
+        self.chunk_size_combo = QComboBox()
+        self.chunk_size_combo.addItems(["64KB", "256KB", "1MB", "4MB", "16MB"])
+        self.chunk_size_combo.setCurrentText("1MB")
+        self.chunk_size_combo.setToolTip("Size of chunks when using Stream processing")
+        strategy_layout.addWidget(self.chunk_size_combo)
+        test_params_layout.addRow(strategy_layout)
         
         # Respect Sentences
         self.respect_sentences_check = QCheckBox()
@@ -282,15 +321,29 @@ class ConfigurationTab(QWidget):
         
         # Checkbox signals
         self.aes_check.toggled.connect(lambda checked: self.aes_key_size_combo.setEnabled(checked))
+        self.aes_check.toggled.connect(lambda checked: self.aes_mode_combo.setEnabled(checked))
         self.rsa_check.toggled.connect(lambda checked: self.rsa_key_size_combo.setEnabled(checked))
         self.ecc_check.toggled.connect(lambda checked: self.ecc_curve_combo.setEnabled(checked))
-        self.mlkem_check.toggled.connect(lambda checked: self.mlkem_param_combo.setEnabled(checked))
+        self.twofish_check.toggled.connect(lambda checked: self.twofish_key_size_combo.setEnabled(checked))
+        self.twofish_check.toggled.connect(lambda checked: self.twofish_mode_combo.setEnabled(checked))
+        self.chacha_check.toggled.connect(lambda checked: self.chacha_mode_combo.setEnabled(checked))
+        
+        # Processing strategy signals
+        self.processing_strategy_combo.currentTextChanged.connect(self._update_chunk_size_visibility)
         
         # Initial enable/disable
         self.aes_key_size_combo.setEnabled(self.aes_check.isChecked())
+        self.aes_mode_combo.setEnabled(self.aes_check.isChecked())
         self.rsa_key_size_combo.setEnabled(self.rsa_check.isChecked())
         self.ecc_curve_combo.setEnabled(self.ecc_check.isChecked())
-        self.mlkem_param_combo.setEnabled(self.mlkem_check.isChecked())
+        self.twofish_key_size_combo.setEnabled(self.twofish_check.isChecked())
+        self.twofish_mode_combo.setEnabled(self.twofish_check.isChecked())
+        self.chacha_mode_combo.setEnabled(self.chacha_check.isChecked())
+        self._update_chunk_size_visibility(self.processing_strategy_combo.currentText())
+    
+    def _update_chunk_size_visibility(self, strategy):
+        """Enable/disable chunk size selector based on processing strategy."""
+        self.chunk_size_combo.setEnabled(strategy == "Stream")
     
     def _save_config(self):
         """Save configuration to a file."""
@@ -306,10 +359,12 @@ class ConfigurationTab(QWidget):
             "encryption_methods": {
                 "aes": {
                     "enabled": self.aes_check.isChecked(),
-                    "key_size": self.aes_key_size_combo.currentText()
+                    "key_size": self.aes_key_size_combo.currentText(),
+                    "mode": self.aes_mode_combo.currentText()
                 },
                 "chacha20": {
-                    "enabled": self.chacha_check.isChecked()
+                    "enabled": self.chacha_check.isChecked(),
+                    "use_poly1305": self.chacha_mode_combo.currentText() == "ChaCha20-Poly1305"
                 },
                 "rsa": {
                     "enabled": self.rsa_check.isChecked(),
@@ -319,13 +374,15 @@ class ConfigurationTab(QWidget):
                     "enabled": self.ecc_check.isChecked(),
                     "curve": self.ecc_curve_combo.currentText()
                 },
-                "mlkem": {
-                    "enabled": self.mlkem_check.isChecked(),
-                    "param_set": self.mlkem_param_combo.currentText()
+                "twofish": {
+                    "enabled": self.twofish_check.isChecked(),
+                    "key_size": self.twofish_key_size_combo.currentText(),
+                    "mode": self.twofish_mode_combo.currentText()
                 }
             },
             "test_parameters": {
-                "ram_limit": 0,  # Always 0 (unlimited)
+                "processing_strategy": self.processing_strategy_combo.currentText(),
+                "chunk_size": self.chunk_size_combo.currentText(),
                 "respect_sentences": self.respect_sentences_check.isChecked(),
                 "include_stdlibs": self.include_stdlibs_check.isChecked(),
                 "iterations": self.iterations_spin.value()
@@ -377,8 +434,10 @@ class ConfigurationTab(QWidget):
                 # Encryption methods
                 self.aes_check.setChecked(config["encryption_methods"]["aes"]["enabled"])
                 self.aes_key_size_combo.setCurrentText(config["encryption_methods"]["aes"]["key_size"])
+                self.aes_mode_combo.setCurrentText(config["encryption_methods"]["aes"]["mode"])
                 
                 self.chacha_check.setChecked(config["encryption_methods"]["chacha20"]["enabled"])
+                self.chacha_mode_combo.setCurrentText(config["encryption_methods"]["chacha20"]["use_poly1305"] and "ChaCha20-Poly1305" or "ChaCha20")
                 
                 self.rsa_check.setChecked(config["encryption_methods"]["rsa"]["enabled"])
                 self.rsa_key_size_combo.setCurrentText(config["encryption_methods"]["rsa"]["key_size"])
@@ -386,11 +445,13 @@ class ConfigurationTab(QWidget):
                 self.ecc_check.setChecked(config["encryption_methods"]["ecc"]["enabled"])
                 self.ecc_curve_combo.setCurrentText(config["encryption_methods"]["ecc"]["curve"])
                 
-                self.mlkem_check.setChecked(config["encryption_methods"]["mlkem"]["enabled"])
-                self.mlkem_param_combo.setCurrentText(config["encryption_methods"]["mlkem"]["param_set"])
+                self.twofish_check.setChecked(config["encryption_methods"]["twofish"]["enabled"])
+                self.twofish_key_size_combo.setCurrentText(config["encryption_methods"]["twofish"]["key_size"])
+                self.twofish_mode_combo.setCurrentText(config["encryption_methods"]["twofish"]["mode"])
                 
                 # Test parameters
-                # RAM limit is no longer used
+                self.processing_strategy_combo.setCurrentText(config["test_parameters"]["processing_strategy"])
+                self.chunk_size_combo.setCurrentText(config["test_parameters"]["chunk_size"])
                 self.respect_sentences_check.setChecked(config["test_parameters"]["respect_sentences"])
                 self.include_stdlibs_check.setChecked(config["test_parameters"]["include_stdlibs"])
                 self.iterations_spin.setValue(config["test_parameters"]["iterations"])
@@ -446,7 +507,7 @@ class ConfigurationTab(QWidget):
             self.chacha_check.isChecked(),
             self.rsa_check.isChecked(),
             self.ecc_check.isChecked(),
-            self.mlkem_check.isChecked()
+            self.twofish_check.isChecked()
         ]):
             QMessageBox.warning(self, "Warning", "Please select at least one encryption method.")
             return
@@ -477,13 +538,23 @@ class ConfigurationTab(QWidget):
                     if dataset_tab and hasattr(dataset_tab, 'get_selected_dataset'):
                         dataset_path = dataset_tab.get_selected_dataset()
                         
+                        # Validate dataset
+                        if not dataset_path:
+                            QMessageBox.warning(self, "Dataset Required", 
+                                "Please select a dataset in the Dataset tab before starting the tests.")
+                            self.status_message.emit("Test not started: No dataset selected")
+                            return
+                        
                         # If a dataset is selected, get information about it
-                        if dataset_path:
-                            dataset_info = self._get_dataset_info(dataset_path)
-                            dataset_sample = self._get_dataset_sample(dataset_path, 200)
+                        dataset_info = self._get_dataset_info(dataset_path)
+                        dataset_sample = self._get_dataset_sample(dataset_path, 200)
         except Exception as e:
             # Log the error but continue without dataset information
             print(f"Error accessing dataset tab: {str(e)}")
+            QMessageBox.warning(self, "Dataset Error", 
+                f"Could not access dataset information: {str(e)}\n\nPlease select a dataset in the Dataset tab.")
+            self.status_message.emit("Test not started: Dataset error")
+            return
         
         # Format timestamp for human readability
         now = datetime.now()
@@ -491,7 +562,15 @@ class ConfigurationTab(QWidget):
         human_timestamp = now.strftime("%d.%m.%Y-%H:%M:%S")  # Updated format with 4-digit year
         
         # Create sessions directory if it doesn't exist
-        sessions_dir = os.path.join(os.getcwd(), "sessions")
+        # Get project root directory
+        project_root = os.getcwd()
+        
+        # If running from src directory, go up one level to find project root
+        if os.path.basename(project_root) == "src":
+            project_root = os.path.dirname(project_root)
+            
+        # Use project root for sessions directory
+        sessions_dir = os.path.join(project_root, "sessions")
         os.makedirs(sessions_dir, exist_ok=True)
         
         # Create session directory with new format
@@ -524,10 +603,12 @@ class ConfigurationTab(QWidget):
             "encryption_methods": {
                 "aes": {
                     "enabled": self.aes_check.isChecked(),
-                    "key_size": self.aes_key_size_combo.currentText()
+                    "key_size": self.aes_key_size_combo.currentText(),
+                    "mode": self.aes_mode_combo.currentText()
                 },
                 "chacha20": {
-                    "enabled": self.chacha_check.isChecked()
+                    "enabled": self.chacha_check.isChecked(),
+                    "use_poly1305": self.chacha_mode_combo.currentText() == "ChaCha20-Poly1305"
                 },
                 "rsa": {
                     "enabled": self.rsa_check.isChecked(),
@@ -537,13 +618,15 @@ class ConfigurationTab(QWidget):
                     "enabled": self.ecc_check.isChecked(),
                     "curve": self.ecc_curve_combo.currentText()
                 },
-                "mlkem": {
-                    "enabled": self.mlkem_check.isChecked(),
-                    "param_set": self.mlkem_param_combo.currentText()
+                "twofish": {
+                    "enabled": self.twofish_check.isChecked(),
+                    "key_size": self.twofish_key_size_combo.currentText(),
+                    "mode": self.twofish_mode_combo.currentText()
                 }
             },
             "test_parameters": {
-                "ram_limit": 0,  # Always set to 0 (unlimited)
+                "processing_strategy": self.processing_strategy_combo.currentText(),
+                "chunk_size": self.chunk_size_combo.currentText(),
                 "respect_sentences": self.respect_sentences_check.isChecked(),
                 "include_stdlibs": self.include_stdlibs_check.isChecked(),
                 "iterations": self.iterations_spin.value(),
@@ -560,18 +643,13 @@ class ConfigurationTab(QWidget):
             "pc_specifications": pc_specs
         }
         
-        # Save configuration as session JSON in project root (for orchestrator to find)
-        session_json_path = os.path.join(os.getcwd(), f"session-{timestamp}.json")
-        with open(session_json_path, "w") as f:
-            json.dump(config, f, indent=4)
-        
-        # Also save a copy in the session directory
+        # Save configuration as session JSON in the session directory only
         config_path = os.path.join(session_dir, "test_config.json")
         with open(config_path, "w") as f:
             json.dump(config, f, indent=4)
         
         # Emit signal to indicate tests are starting
-        self.status_message.emit(f"Starting tests with configuration from {session_json_path}")
+        self.status_message.emit(f"Starting tests with configuration from {config_path}")
         
         # Notify user
         QMessageBox.information(
@@ -582,35 +660,69 @@ class ConfigurationTab(QWidget):
             f"Results will be available in the Results Viewer tab when complete."
         )
         
-        # Automatically run the orchestrator
-        try:
-            # Import and run the orchestrator
-            from src.orchestrator import main as run_orchestrator
-            self.status_message.emit("Launching orchestrator...")
-            self.progress_text.setText("Preparing benchmark...")
-            
-            # Run in a separate thread to avoid blocking the UI
-            self.orchestrator_thread = OrchestrationThread(run_orchestrator)
-            
-            # Connect signals
-            self.orchestrator_thread.finished.connect(self._orchestration_finished)
-            self.orchestrator_thread.orchestration_complete.connect(self._orchestration_completed)
-            
-            # Connect progress updates to UI
-            self.orchestrator_thread.progress_update.connect(self._update_progress)
-            
-            # Start the thread
-            self.orchestrator_thread.start()
-        except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Orchestration Error",
-                f"Failed to start orchestrator: {str(e)}\n\n"
-                f"You may need to run it manually with:\n"
-                f"python -m src.orchestrator"
-            )
-            self.status_message.emit(f"Orchestration error: {str(e)}")
-            self.progress_text.setText(f"Error: {str(e)}")
+        # If Python is selected, run Python tests directly
+        if self.lang_python_check.isChecked():
+            try:
+                # Get the path to the Python test script
+                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                python_test_script = os.path.join(script_dir, "encryption", "python", "run_python_tests.sh")
+                
+                # Make sure the script is executable
+                os.chmod(python_test_script, 0o755)
+                
+                # Run the Python test script
+                self.progress_text.setText("Running Python encryption tests...")
+                subprocess.run([python_test_script, config_path], check=True)
+                
+                # Update progress
+                self.progress_text.setText("Python tests completed successfully")
+                self.status_message.emit("Python tests completed successfully")
+            except subprocess.CalledProcessError as e:
+                error_msg = f"Python tests failed: {str(e)}"
+                self.progress_text.setText(error_msg)
+                self.status_message.emit(error_msg)
+                QMessageBox.warning(self, "Test Error", error_msg)
+            except Exception as e:
+                error_msg = f"Error running Python tests: {str(e)}"
+                self.progress_text.setText(error_msg)
+                self.status_message.emit(error_msg)
+                QMessageBox.warning(self, "Test Error", error_msg)
+        
+        # For other languages, run the orchestrator
+        if any([
+            self.lang_c_check.isChecked(),
+            self.lang_rust_check.isChecked(),
+            self.lang_go_check.isChecked(),
+            self.lang_assembly_check.isChecked()
+        ]):
+            try:
+                # Import and run the orchestrator
+                from src.orchestrator import main as run_orchestrator
+                self.status_message.emit("Launching orchestrator...")
+                self.progress_text.setText("Preparing benchmark...")
+                
+                # Run in a separate thread to avoid blocking the UI
+                self.orchestrator_thread = OrchestrationThread(run_orchestrator)
+                
+                # Connect signals
+                self.orchestrator_thread.finished.connect(self._orchestration_finished)
+                self.orchestrator_thread.orchestration_complete.connect(self._orchestration_completed)
+                
+                # Connect progress updates to UI
+                self.orchestrator_thread.progress_update.connect(self._update_progress)
+                
+                # Start the thread
+                self.orchestrator_thread.start()
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Orchestration Error",
+                    f"Failed to start orchestrator: {str(e)}\n\n"
+                    f"You may need to run it manually with:\n"
+                    f"python -m src.orchestrator"
+                )
+                self.status_message.emit(f"Orchestration error: {str(e)}")
+                self.progress_text.setText(f"Error: {str(e)}")
     
     def _update_progress(self, message):
         """Update the progress display with new information."""
@@ -816,20 +928,9 @@ class ConfigurationTab(QWidget):
 
     def _generate_test_params(self):
         """Generate test parameters from current UI state."""
-        # Get RAM limit (convert to MB for config)
-        ram_limit_str = self.ram_limit_combo.currentText()
-        ram_limit_mb = 0  # Default to unlimited (Uncapped)
-        
-        if ram_limit_str != "Uncapped":
-            if ram_limit_str.endswith("MB"):
-                ram_limit_mb = int(ram_limit_str.replace("MB", ""))
-            elif ram_limit_str.endswith("GB"):
-                ram_limit_mb = int(ram_limit_str.replace("GB", "")) * 1024
-        
-        # Rest of the method remains unchanged
         return {
             "iterations": self.iterations_spin.value(),
-            "ram_limit": ram_limit_mb,
+            "processing_strategy": self.processing_strategy_combo.currentText(),
             "respect_sentences": self.respect_sentences_check.isChecked(),
             "include_stdlibs": self.include_stdlibs_check.isChecked(),
             "dataset_path": self.dataset_combo.currentData()

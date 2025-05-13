@@ -216,9 +216,15 @@ class ResultsTab(QWidget):
         # Clear combo box
         self.session_combo.clear()
         
-        # Find all session directories - handle both old and new formats
-        session_dirs = glob.glob(os.path.join(os.getcwd(), "session_*"))
-        session_dirs.extend(glob.glob(os.path.join(os.getcwd(), "Session-*")))
+        # Find all session directories - look in the sessions directory in project root
+        project_root = os.getcwd()
+        
+        # If running from src directory, go up one level
+        if os.path.basename(project_root) == "src":
+            project_root = os.path.dirname(project_root)
+            
+        sessions_dir = os.path.join(project_root, "sessions")
+        session_dirs = glob.glob(os.path.join(sessions_dir, "Session-*"))
         
         # Sort by creation time (newest first)
         session_dirs.sort(key=os.path.getctime, reverse=True)
@@ -227,20 +233,7 @@ class ResultsTab(QWidget):
         for session_dir in session_dirs:
             # Create display name
             dir_name = os.path.basename(session_dir)
-            
-            # Handle old format (session_YYYYMMDD_HHMMSS)
-            if dir_name.startswith("session_"):
-                try:
-                    # Try to parse timestamp from directory name
-                    timestamp = dir_name.replace("session_", "")
-                    dt = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
-                    display_name = f"{dt.strftime('%Y-%m-%d %H:%M:%S')} ({dir_name})"
-                except ValueError:
-                    # If parsing fails, just use the directory name
-                    display_name = dir_name
-            # Handle new format (Session-DD.MM.YY-HH:MM:SS)
-            else:
-                display_name = dir_name
+            display_name = dir_name
             
             # Store the actual path in the user data
             self.session_combo.addItem(display_name, session_dir)

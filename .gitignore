@@ -4,6 +4,8 @@ src/ui/__pycache__/
 src/ui/tabs/__pycache__/
 src/datasets/
 src/encryption/python/__pycache__/
+src/encryption/python/aes/__pycache__/
 sessions/
+src/encryption/python/aes/build/
 
 
