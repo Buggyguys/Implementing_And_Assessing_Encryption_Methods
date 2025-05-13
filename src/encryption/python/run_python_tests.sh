@@ -25,11 +25,20 @@ echo "Project root: $PROJECT_ROOT"
 # Add the project root to PYTHONPATH
 export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 
-# Instead of creating a separate file, directly check registered implementations
-python3 -c "from src.encryption.python.aes import AESImplementation; from src.encryption.python.python_core import ENCRYPTION_IMPLEMENTATIONS; print(f\"Registered implementations in preload: {list(ENCRYPTION_IMPLEMENTATIONS.keys())}\")"
+# Default to pypy3 if available, otherwise fallback to python3
+if command -v pypy3 &> /dev/null; then
+    PYTHON_CMD="pypy3"
+    echo "Using PyPy3 interpreter"
+else
+    PYTHON_CMD="python3"
+    echo "PyPy3 not found, using standard Python3 interpreter"
+fi
 
-# Run the Python core directly using the Python interpreter
-python3 -m src.encryption.python.python_core "$CONFIG_FILE"
+# Instead of creating a separate file, directly check registered implementations
+$PYTHON_CMD -c "from src.encryption.python.aes import AESImplementation; from src.encryption.python.python_core import ENCRYPTION_IMPLEMENTATIONS; print(f\"Registered implementations in preload: {list(ENCRYPTION_IMPLEMENTATIONS.keys())}\")"
+
+# Run the Python core directly using the specified Python interpreter
+$PYTHON_CMD -m src.encryption.python.python_core "$CONFIG_FILE"
 
 echo "Python encryption tests completed"
 exit 0 

@@ -384,7 +384,57 @@ class ResultsTab(QWidget):
         # Test parameters
         summary.append(f"<b>RAM Limit:</b> {config['test_parameters']['ram_limit']}")
         summary.append(f"<b>Iterations:</b> {config['test_parameters']['iterations']}")
-        summary.append(f"<b>Standard Library Comparison:</b> {'Yes' if config['test_parameters']['include_stdlibs'] else 'No'}")
+        
+        # Implementation options
+        implementations = []
+        processing_strategy = None
+        chunk_size = None
+        
+        # Get configuration from either the new or old format
+        if "test_configuration" in config:
+            # New format with dedicated test_configuration section
+            test_config = config["test_configuration"]
+            
+            # Get implementation types
+            if test_config.get("use_stdlib_implementations", False):
+                implementations.append("Standard Library")
+            if test_config.get("use_custom_implementations", False):
+                implementations.append("Custom")
+            
+            # Get processing strategy information
+            processing_strategy = test_config.get("processing_strategy")
+            if processing_strategy == "Stream":
+                chunk_size = test_config.get("chunk_size")
+        else:
+            # Legacy format with parameters in test_parameters
+            test_params = config["test_parameters"]
+            
+            # Get implementation types from legacy format
+            if "use_stdlib" in test_params and "use_custom" in test_params:
+                if test_params.get("use_stdlib", False):
+                    implementations.append("Standard Library")
+                if test_params.get("use_custom", False):
+                    implementations.append("Custom")
+            elif "include_stdlibs" in test_params:
+                # Very old format
+                implementations.append("Custom")  # Always included in old format
+                if test_params.get("include_stdlibs", False):
+                    implementations.append("Standard Library")
+            
+            # Get processing strategy from legacy format
+            processing_strategy = test_params.get("processing_strategy")
+            if processing_strategy == "Stream":
+                chunk_size = test_params.get("chunk_size")
+        
+        # Add implementation types to summary
+        if implementations:
+            summary.append(f"<b>Implementations:</b> {', '.join(implementations)}")
+        
+        # Add processing strategy to summary
+        if processing_strategy:
+            summary.append(f"<b>Processing Strategy:</b> {processing_strategy}")
+            if processing_strategy == "Stream" and chunk_size:
+                summary.append(f"<b>Chunk Size:</b> {chunk_size}")
         
         # Add dataset information if available
         if "dataset_info" in config and config["dataset_info"]:

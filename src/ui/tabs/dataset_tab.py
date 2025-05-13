@@ -770,18 +770,14 @@ class DatasetTab(QWidget):
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
         
-        # Option group
-        option_group = QGroupBox("Dataset Selection")
-        option_layout = QVBoxLayout()
-        
-        # Option 1: Select Existing Dataset
-        self.option1_radio = QRadioButton("Select Existing Dataset")
-        option_layout.addWidget(self.option1_radio)
+        # Dataset selection group
+        selection_group = QGroupBox("Select Existing Dataset")
+        selection_layout = QVBoxLayout()
         
         # Dataset selection - use a list widget instead of file dialog
         self.datasets_list = QComboBox()
         self.datasets_list.setMinimumWidth(400)
-        option_layout.addWidget(self.datasets_list)
+        selection_layout.addWidget(self.datasets_list)
         
         # Refresh datasets button
         refresh_layout = QHBoxLayout()
@@ -790,14 +786,13 @@ class DatasetTab(QWidget):
         refresh_layout.addWidget(self.refresh_button)
         refresh_layout.addWidget(self.dataset_info_label)
         refresh_layout.addStretch()
-        option_layout.addLayout(refresh_layout)
+        selection_layout.addLayout(refresh_layout)
         
-        # Option 2: Create New Dataset
-        self.option2_radio = QRadioButton("Create New Dataset")
-        option_layout.addWidget(self.option2_radio)
+        # Set layout for selection group
+        selection_group.setLayout(selection_layout)
         
-        # Dataset creation form
-        creation_group = QGroupBox("Dataset Creation Parameters")
+        # Dataset creation group
+        creation_group = QGroupBox("Create New Dataset")
         creation_layout = QFormLayout()
         
         # Dataset type
@@ -843,26 +838,23 @@ class DatasetTab(QWidget):
         
         creation_layout.addRow(self.custom_params_group)
         
-        # Set layout for creation group
-        creation_group.setLayout(creation_layout)
-        option_layout.addWidget(creation_group)
-        
         # Progress bar for dataset generation
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
-        option_layout.addWidget(self.progress_bar)
+        creation_layout.addRow(self.progress_bar)
         
         # Generate dataset button
         self.generate_button = QPushButton("Generate Dataset")
-        option_layout.addWidget(self.generate_button)
+        creation_layout.addRow(self.generate_button)
         
-        # Add option layout to group
-        option_group.setLayout(option_layout)
+        # Set layout for creation group
+        creation_group.setLayout(creation_layout)
         
         # Add groups to scroll layout
-        scroll_layout.addWidget(option_group)
+        scroll_layout.addWidget(selection_group)
+        scroll_layout.addWidget(creation_group)
         
         # Add spacing
         scroll_layout.addStretch()
@@ -870,10 +862,6 @@ class DatasetTab(QWidget):
         # Set the scroll content and add to main layout
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
-        
-        # Default selection
-        self.option1_radio.setChecked(True)
-        self._update_ui_state()
         
         # Connect signals
         self._connect_signals()
@@ -886,100 +874,26 @@ class DatasetTab(QWidget):
     
     def _connect_signals(self):
         """Connect signals to slots."""
-        # Radio button signals
-        self.option1_radio.toggled.connect(self._update_ui_state)
-        self.option2_radio.toggled.connect(self._update_ui_state)
-        
-        # Button signals
-        self.refresh_button.clicked.connect(self._refresh_datasets_list)
-        self.generate_button.clicked.connect(self._generate_dataset)
-        
-        # Combo box signals
+        # Connect dataset type combo to update custom params
         self.dataset_type_combo.currentIndexChanged.connect(self._update_custom_params)
+        
+        # Connect dataset list to selection handler
         self.datasets_list.currentIndexChanged.connect(self._dataset_selected)
         
-        # Size unit change
+        # Connect generate button
+        self.generate_button.clicked.connect(self._generate_dataset)
+        
+        # Connect refresh button
+        self.refresh_button.clicked.connect(self._refresh_datasets_list)
+        
+        # Connect size unit change to update limits
         self.size_unit_combo.currentIndexChanged.connect(self._update_size_limits)
-    
-    def _update_ui_state(self):
-        """Update UI components based on selected option."""
-        # Update file selection controls
-        self.datasets_list.setEnabled(self.option1_radio.isChecked())
-        self.refresh_button.setEnabled(self.option1_radio.isChecked())
         
-        # Update dataset creation controls
-        enable_creation = self.option2_radio.isChecked()
-        self.dataset_type_combo.setEnabled(enable_creation)
-        self.dataset_name_edit.setEnabled(enable_creation)
-        self.total_size_spin.setEnabled(enable_creation)
-        self.size_unit_combo.setEnabled(enable_creation)
-        self.custom_params_group.setEnabled(enable_creation)
-        
-        # Enable/disable generate button
-        self.generate_button.setEnabled(enable_creation)
+        # Initialize the UI with proper enabled states for custom params
+        self._update_custom_params()
     
-    def _update_size_limits(self):
-        """Update size limits based on selected unit."""
-        unit = self.size_unit_combo.currentText()
-        
-        if unit == "KB":
-            self.total_size_spin.setMinimum(500)  # Min 500 KB
-            self.total_size_spin.setMaximum(50000)  # Max 50,000 KB
-            if self.total_size_spin.value() < 500:
-                self.total_size_spin.setValue(500)
-        elif unit == "MB":
-            self.total_size_spin.setMinimum(1)  # Min 1 MB
-            self.total_size_spin.setMaximum(50000)  # Max 50,000 MB
-            if self.total_size_spin.value() < 1:
-                self.total_size_spin.setValue(1)
-        elif unit == "GB":
-            self.total_size_spin.setMinimum(1)  # Min 1 GB
-            self.total_size_spin.setMaximum(50)  # Max 50 GB
-            if self.total_size_spin.value() > 50:
-                self.total_size_spin.setValue(50)
-                
-        # Show the valid range instead of bytes size
-        self.size_tooltip_label.setText("(Range: 500KB - 50GB)")
-    
-    def _format_size(self, size_bytes):
-        """Format size in bytes to a human-readable string."""
-        if size_bytes < 1024:
-            return f"{size_bytes} bytes"
-        elif size_bytes < 1024**2:
-            return f"{size_bytes/1024:.2f} KB"
-        elif size_bytes < 1024**3:
-            return f"{size_bytes/1024**2:.2f} MB"
-        elif size_bytes < 1024**4:
-            return f"{size_bytes/1024**3:.2f} GB"
-        else:
-            return f"{size_bytes/1024**4:.2f} TB"
-    
-    def _clear_layout(self, layout):
-        """Clear all widgets and nested layouts from a layout."""
-        if layout is None:
-            return
-        
-        # Get all items in reverse order (to avoid index shifting when items are removed)
-        for i in reversed(range(layout.count())):
-            item = layout.itemAt(i)
-            
-            if item.widget():
-                # If it's a widget, set its parent to None (removes it from layout)
-                item.widget().setParent(None)
-            elif item.layout():
-                # If it's a layout, recursively clear it
-                self._clear_layout(item.layout())
-                # Then remove it from the parent layout
-                layout.removeItem(item)
-            else:
-                # For spacer items or other types
-                layout.removeItem(item)
-
     def _update_custom_params(self):
         """Update custom parameters based on selected dataset type."""
-        # Only enable if option 2 is selected
-        enable_custom = self.option2_radio.isChecked()
-        
         # Get selected dataset type
         dataset_type = self.dataset_type_combo.currentText()
         
@@ -994,14 +908,12 @@ class DatasetTab(QWidget):
             self.min_word_length_spin = QSpinBox()
             self.min_word_length_spin.setRange(1, 50)
             self.min_word_length_spin.setValue(3)
-            self.min_word_length_spin.setEnabled(enable_custom)
             length_layout.addWidget(QLabel("Min:"))
             length_layout.addWidget(self.min_word_length_spin)
             
             self.max_word_length_spin = QSpinBox()
             self.max_word_length_spin.setRange(1, 100)
             self.max_word_length_spin.setValue(10)
-            self.max_word_length_spin.setEnabled(enable_custom)
             length_layout.addWidget(QLabel("Max:"))
             length_layout.addWidget(self.max_word_length_spin)
             
@@ -1012,7 +924,6 @@ class DatasetTab(QWidget):
             
             self.include_spaces_check = QCheckBox("Include spaces between words")
             self.include_spaces_check.setChecked(True)
-            self.include_spaces_check.setEnabled(enable_custom)
             spaces_layout.addWidget(self.include_spaces_check)
             
             # Space frequency slider
@@ -1022,7 +933,8 @@ class DatasetTab(QWidget):
             self.space_frequency_slider = QSlider(Qt.Orientation.Horizontal)
             self.space_frequency_slider.setRange(1, 100)
             self.space_frequency_slider.setValue(100)  # 100% by default
-            self.space_frequency_slider.setEnabled(enable_custom)
+            # Only enable slider if spaces are included
+            self.space_frequency_slider.setEnabled(self.include_spaces_check.isChecked())
             slider_layout.addWidget(self.space_frequency_slider)
             
             self.space_frequency_label = QLabel("100%")
@@ -1031,6 +943,11 @@ class DatasetTab(QWidget):
             # Connect slider to label
             self.space_frequency_slider.valueChanged.connect(
                 lambda value: self.space_frequency_label.setText(f"{value}%")
+            )
+            
+            # Connect spaces checkbox to enable/disable slider
+            self.include_spaces_check.toggled.connect(
+                lambda checked: self.space_frequency_slider.setEnabled(checked)
             )
             
             spaces_layout.addLayout(slider_layout)
@@ -1064,7 +981,8 @@ class DatasetTab(QWidget):
             self.uppercase_prob_slider = QSlider(Qt.Orientation.Horizontal)
             self.uppercase_prob_slider.setRange(1, 100)
             self.uppercase_prob_slider.setValue(20)  # 20% by default
-            self.uppercase_prob_slider.setEnabled(enable_custom)
+            # Only enable slider if random uppercase is selected
+            self.uppercase_prob_slider.setEnabled(self.uppercase_random_radio.isChecked())
             prob_layout.addWidget(self.uppercase_prob_slider)
             
             self.uppercase_prob_label = QLabel("20%")
@@ -1078,12 +996,11 @@ class DatasetTab(QWidget):
             uppercase_layout.addLayout(prob_layout)
             self.custom_params_layout.addRow("Uppercase:", uppercase_layout)
             
-            # Connect random radio to enable the slider
-            self.uppercase_random_radio.toggled.connect(
-                lambda checked: self.uppercase_prob_slider.setEnabled(checked and enable_custom)
-            )
-            self.uppercase_prob_slider.setEnabled(self.uppercase_random_radio.isChecked() and enable_custom)
-        
+            # Connect radio buttons to enable/disable slider
+            for radio in [self.uppercase_none_radio, self.uppercase_first_radio, 
+                         self.uppercase_random_radio, self.uppercase_all_radio]:
+                radio.toggled.connect(self._update_uppercase_slider_state)
+                
         elif dataset_type == "Sentences":
             # Sentence length range (in words)
             length_layout = QHBoxLayout()
@@ -1091,14 +1008,14 @@ class DatasetTab(QWidget):
             self.min_sentence_length_spin = QSpinBox()
             self.min_sentence_length_spin.setRange(1, 50)
             self.min_sentence_length_spin.setValue(3)
-            self.min_sentence_length_spin.setEnabled(enable_custom)
+            self.min_sentence_length_spin.setEnabled(True)
             length_layout.addWidget(QLabel("Min:"))
             length_layout.addWidget(self.min_sentence_length_spin)
             
             self.max_sentence_length_spin = QSpinBox()
             self.max_sentence_length_spin.setRange(1, 100)
             self.max_sentence_length_spin.setValue(15)
-            self.max_sentence_length_spin.setEnabled(enable_custom)
+            self.max_sentence_length_spin.setEnabled(True)
             length_layout.addWidget(QLabel("Max:"))
             length_layout.addWidget(self.max_sentence_length_spin)
             
@@ -1110,14 +1027,14 @@ class DatasetTab(QWidget):
             self.min_word_length_spin = QSpinBox()
             self.min_word_length_spin.setRange(1, 20)
             self.min_word_length_spin.setValue(2)
-            self.min_word_length_spin.setEnabled(enable_custom)
+            self.min_word_length_spin.setEnabled(True)
             word_length_layout.addWidget(QLabel("Min:"))
             word_length_layout.addWidget(self.min_word_length_spin)
             
             self.max_word_length_spin = QSpinBox()
             self.max_word_length_spin.setRange(1, 30)
             self.max_word_length_spin.setValue(10)
-            self.max_word_length_spin.setEnabled(enable_custom)
+            self.max_word_length_spin.setEnabled(True)
             word_length_layout.addWidget(QLabel("Max:"))
             word_length_layout.addWidget(self.max_word_length_spin)
             
@@ -1126,13 +1043,13 @@ class DatasetTab(QWidget):
             # Include numbers option
             self.include_numbers_check = QCheckBox("Include numbers")
             self.include_numbers_check.setChecked(False)
-            self.include_numbers_check.setEnabled(enable_custom)
+            self.include_numbers_check.setEnabled(True)
             self.custom_params_layout.addRow(self.include_numbers_check)
             
             # Always capitalize first letter
             self.capitalize_check = QCheckBox("Always capitalize first letter of sentences")
             self.capitalize_check.setChecked(True)
-            self.capitalize_check.setEnabled(enable_custom)
+            self.capitalize_check.setEnabled(True)
             self.custom_params_layout.addRow(self.capitalize_check)
             
             # Punctuation options
@@ -1140,7 +1057,7 @@ class DatasetTab(QWidget):
             
             self.include_punctuation_check = QCheckBox("Include punctuation")
             self.include_punctuation_check.setChecked(True)
-            self.include_punctuation_check.setEnabled(enable_custom)
+            self.include_punctuation_check.setEnabled(True)
             punctuation_layout.addWidget(self.include_punctuation_check)
             
             # Punctuation frequency slider
@@ -1150,7 +1067,7 @@ class DatasetTab(QWidget):
             self.punctuation_freq_slider = QSlider(Qt.Orientation.Horizontal)
             self.punctuation_freq_slider.setRange(1, 100)
             self.punctuation_freq_slider.setValue(20)  # 20% by default
-            self.punctuation_freq_slider.setEnabled(enable_custom)
+            self.punctuation_freq_slider.setEnabled(True)
             punct_slider_layout.addWidget(self.punctuation_freq_slider)
             
             self.punctuation_freq_label = QLabel("20%")
@@ -1166,9 +1083,9 @@ class DatasetTab(QWidget):
             
             # Connect check to enable slider
             self.include_punctuation_check.toggled.connect(
-                lambda checked: self.punctuation_freq_slider.setEnabled(checked and enable_custom)
+                lambda checked: self.punctuation_freq_slider.setEnabled(checked)
             )
-            self.punctuation_freq_slider.setEnabled(self.include_punctuation_check.isChecked() and enable_custom)
+            self.punctuation_freq_slider.setEnabled(self.include_punctuation_check.isChecked())
             
             # Sentence spacing options
             spacing_layout = QHBoxLayout()
@@ -1176,7 +1093,7 @@ class DatasetTab(QWidget):
             
             self.sentence_spacing_combo = QComboBox()
             self.sentence_spacing_combo.addItems(["Single space", "Double space", "Random (1-3 spaces)"])
-            self.sentence_spacing_combo.setEnabled(enable_custom)
+            self.sentence_spacing_combo.setEnabled(True)
             spacing_layout.addWidget(self.sentence_spacing_combo)
             
             self.custom_params_layout.addRow("Spacing:", spacing_layout)
@@ -1185,7 +1102,7 @@ class DatasetTab(QWidget):
             # Number type
             self.number_type_combo = QComboBox()
             self.number_type_combo.addItems(["decimal", "binary", "hexadecimal"])
-            self.number_type_combo.setEnabled(enable_custom)
+            self.number_type_combo.setEnabled(True)
             self.custom_params_layout.addRow("Number Type:", self.number_type_combo)
             
             # Number length range (in digits)
@@ -1194,14 +1111,14 @@ class DatasetTab(QWidget):
             self.min_digits_spin = QSpinBox()
             self.min_digits_spin.setRange(1, 100)
             self.min_digits_spin.setValue(1)
-            self.min_digits_spin.setEnabled(enable_custom)
+            self.min_digits_spin.setEnabled(True)
             length_layout.addWidget(QLabel("Min:"))
             length_layout.addWidget(self.min_digits_spin)
             
             self.max_digits_spin = QSpinBox()
             self.max_digits_spin.setRange(1, 1000)
             self.max_digits_spin.setValue(10)
-            self.max_digits_spin.setEnabled(enable_custom)
+            self.max_digits_spin.setEnabled(True)
             length_layout.addWidget(QLabel("Max:"))
             length_layout.addWidget(self.max_digits_spin)
             
@@ -1210,7 +1127,7 @@ class DatasetTab(QWidget):
             # Spaces option
             self.number_spaces_check = QCheckBox("Include spaces between numbers")
             self.number_spaces_check.setChecked(True)
-            self.number_spaces_check.setEnabled(enable_custom)
+            self.number_spaces_check.setEnabled(True)
             self.custom_params_layout.addRow(self.number_spaces_check)
             
             # Format options
@@ -1218,12 +1135,12 @@ class DatasetTab(QWidget):
             
             self.include_prefix_check = QCheckBox("Include prefixes (0x, 0b)")
             self.include_prefix_check.setChecked(False)
-            self.include_prefix_check.setEnabled(enable_custom)
+            self.include_prefix_check.setEnabled(True)
             format_layout.addWidget(self.include_prefix_check)
             
             self.include_grouping_check = QCheckBox("Include grouping separators (_)")
             self.include_grouping_check.setChecked(False)
-            self.include_grouping_check.setEnabled(enable_custom)
+            self.include_grouping_check.setEnabled(True)
             format_layout.addWidget(self.include_grouping_check)
             
             self.custom_params_layout.addRow("Format:", format_layout)
@@ -1238,7 +1155,7 @@ class DatasetTab(QWidget):
             # Custom charset
             self.custom_charset_edit = QLineEdit()
             self.custom_charset_edit.setPlaceholderText("e.g., abcdefABCDEF0123456789")
-            self.custom_charset_edit.setEnabled(enable_custom)
+            self.custom_charset_edit.setEnabled(True)
             self.custom_params_layout.addRow("Custom Charset:", self.custom_charset_edit)
             
             # Predefined charset selections
@@ -1256,14 +1173,14 @@ class DatasetTab(QWidget):
                 "ASCII printable",
                 "Base64 characters"
             ])
-            self.charset_preset_combo.setEnabled(enable_custom)
+            self.charset_preset_combo.setEnabled(True)
             preset_layout.addWidget(self.charset_preset_combo)
             
             # Connect preset selection to charset edit
             self.charset_preset_combo.currentIndexChanged.connect(self._update_charset_preset)
             
             self.custom_params_layout.addRow("Presets:", preset_layout)
-    
+        
     def _refresh_datasets_list(self):
         """Refresh the list of available datasets."""
         self.datasets_list.clear()
@@ -1447,8 +1364,7 @@ class DatasetTab(QWidget):
         self.selected_dataset_path = file_path
         self.status_message.emit(f"Dataset generated successfully: {os.path.basename(file_path)}")
         
-        # Switch to option 1 and refresh the list
-        self.option1_radio.setChecked(True)
+        # Refresh the list to include the new dataset
         self._refresh_datasets_list()
         
         # Select the newly created dataset
@@ -1469,7 +1385,7 @@ class DatasetTab(QWidget):
     
     def get_selected_dataset(self):
         """Get the selected dataset path."""
-        if self.option1_radio.isChecked() and self.selected_dataset_path:
+        if self.selected_dataset_path:
             return self.selected_dataset_path
         return None
 
@@ -1493,4 +1409,67 @@ class DatasetTab(QWidget):
         elif preset == "ASCII printable":
             self.custom_charset_edit.setText(string.printable)
         elif preset == "Base64 characters":
-            self.custom_charset_edit.setText(string.ascii_letters + string.digits + "+/=") 
+            self.custom_charset_edit.setText(string.ascii_letters + string.digits + "+/=")
+
+    def _update_uppercase_slider_state(self):
+        """Update the state of the uppercase probability slider based on the selected radio button."""
+        if hasattr(self, 'uppercase_random_radio') and hasattr(self, 'uppercase_prob_slider'):
+            is_random_selected = self.uppercase_random_radio.isChecked()
+            self.uppercase_prob_slider.setEnabled(is_random_selected)
+
+    def _update_size_limits(self):
+        """Update size limits based on selected unit."""
+        unit = self.size_unit_combo.currentText()
+        
+        if unit == "KB":
+            self.total_size_spin.setMinimum(500)  # Min 500 KB
+            self.total_size_spin.setMaximum(50000)  # Max 50,000 KB
+            if self.total_size_spin.value() < 500:
+                self.total_size_spin.setValue(500)
+        elif unit == "MB":
+            self.total_size_spin.setMinimum(1)  # Min 1 MB
+            self.total_size_spin.setMaximum(50000)  # Max 50,000 MB
+            if self.total_size_spin.value() < 1:
+                self.total_size_spin.setValue(1)
+        elif unit == "GB":
+            self.total_size_spin.setMinimum(1)  # Min 1 GB
+            self.total_size_spin.setMaximum(50)  # Max 50 GB
+            if self.total_size_spin.value() > 50:
+                self.total_size_spin.setValue(50)
+                
+        # Show the valid range instead of bytes size
+        self.size_tooltip_label.setText("(Range: 500KB - 50GB)")
+
+    def _clear_layout(self, layout):
+        """Clear all widgets and nested layouts from a layout."""
+        if layout is None:
+            return
+        
+        # Get all items in reverse order (to avoid index shifting when items are removed)
+        for i in reversed(range(layout.count())):
+            item = layout.itemAt(i)
+            
+            if item.widget():
+                # If it's a widget, set its parent to None (removes it from layout)
+                item.widget().setParent(None)
+            elif item.layout():
+                # If it's a layout, recursively clear it
+                self._clear_layout(item.layout())
+                # Then remove it from the parent layout
+                layout.removeItem(item)
+            else:
+                # For spacer items or other types
+                layout.removeItem(item)
+
+    def _format_size(self, size_bytes):
+        """Format size in bytes to a human-readable string."""
+        if size_bytes < 1024:
+            return f"{size_bytes} bytes"
+        elif size_bytes < 1024**2:
+            return f"{size_bytes/1024:.2f} KB"
+        elif size_bytes < 1024**3:
+            return f"{size_bytes/1024**2:.2f} MB"
+        elif size_bytes < 1024**4:
+            return f"{size_bytes/1024**3:.2f} GB"
+        else:
+            return f"{size_bytes/1024**4:.2f} TB" 

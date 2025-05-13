@@ -240,14 +240,21 @@ class ConfigurationTab(QWidget):
         strategy_layout.addWidget(self.chunk_size_combo)
         test_params_layout.addRow(strategy_layout)
         
-        # Respect Sentences
-        self.respect_sentences_check = QCheckBox()
-        test_params_layout.addRow("Respect Sentences:", self.respect_sentences_check)
+        # Replace the single checkbox with two separate ones
+        encryption_options_layout = QVBoxLayout()
         
-        # Include Standard Library Comparison
-        self.include_stdlibs_check = QCheckBox()
-        self.include_stdlibs_check.setChecked(True)  # Default to checked
-        test_params_layout.addRow("Include Comparison with Standard Libraries:", self.include_stdlibs_check)
+        # Standard Libraries checkbox
+        self.use_stdlib_check = QCheckBox("Use Standard Library Implementations")
+        self.use_stdlib_check.setChecked(True)  # Default to checked
+        encryption_options_layout.addWidget(self.use_stdlib_check)
+        
+        # Custom Implementation checkbox
+        self.use_custom_check = QCheckBox("Use Custom Implementations")
+        self.use_custom_check.setChecked(True)  # Default to checked
+        encryption_options_layout.addWidget(self.use_custom_check)
+        
+        # Add the encryption options to the form layout
+        test_params_layout.addRow("Implementation Options:", encryption_options_layout)
         
         # Number of Iterations
         self.iterations_spin = QSpinBox()
@@ -278,25 +285,11 @@ class ConfigurationTab(QWidget):
         # Set layout for buttons group
         buttons_group.setLayout(buttons_layout)
         
-        # Progress Group (new)
-        progress_group = QGroupBox("Progress")
-        progress_layout = QVBoxLayout()
-        
-        # Progress text area
-        self.progress_text = QLabel("Ready")
-        self.progress_text.setMinimumHeight(80)
-        self.progress_text.setWordWrap(True)
-        progress_layout.addWidget(self.progress_text)
-        
-        # Set layout for progress group
-        progress_group.setLayout(progress_layout)
-        
         # Add groups to scroll layout
         scroll_layout.addWidget(languages_group)
         scroll_layout.addWidget(methods_group)
         scroll_layout.addWidget(test_params_group)
         scroll_layout.addWidget(buttons_group)
-        scroll_layout.addWidget(progress_group)  # Add the progress group
         
         # Add spacing
         scroll_layout.addStretch()
@@ -328,6 +321,10 @@ class ConfigurationTab(QWidget):
         self.twofish_check.toggled.connect(lambda checked: self.twofish_mode_combo.setEnabled(checked))
         self.chacha_check.toggled.connect(lambda checked: self.chacha_mode_combo.setEnabled(checked))
         
+        # Connect implementation options checkboxes to validation method
+        self.use_stdlib_check.toggled.connect(self._validate_implementation_options)
+        self.use_custom_check.toggled.connect(self._validate_implementation_options)
+        
         # Processing strategy signals
         self.processing_strategy_combo.currentTextChanged.connect(self._update_chunk_size_visibility)
         
@@ -344,6 +341,18 @@ class ConfigurationTab(QWidget):
     def _update_chunk_size_visibility(self, strategy):
         """Enable/disable chunk size selector based on processing strategy."""
         self.chunk_size_combo.setEnabled(strategy == "Stream")
+    
+    def _validate_implementation_options(self):
+        """Ensure at least one implementation option is selected."""
+        if not self.use_stdlib_check.isChecked() and not self.use_custom_check.isChecked():
+            # If user tries to uncheck both, force the current one to stay checked
+            sender = self.sender()
+            sender.setChecked(True)
+            QMessageBox.warning(
+                self,
+                "Invalid Selection",
+                "At least one implementation type (Standard Library or Custom) must be selected."
+            )
     
     def _save_config(self):
         """Save configuration to a file."""
@@ -383,8 +392,8 @@ class ConfigurationTab(QWidget):
             "test_parameters": {
                 "processing_strategy": self.processing_strategy_combo.currentText(),
                 "chunk_size": self.chunk_size_combo.currentText(),
-                "respect_sentences": self.respect_sentences_check.isChecked(),
-                "include_stdlibs": self.include_stdlibs_check.isChecked(),
+                "use_stdlib": self.use_stdlib_check.isChecked(),
+                "use_custom": self.use_custom_check.isChecked(),
                 "iterations": self.iterations_spin.value()
             }
         }
@@ -452,8 +461,22 @@ class ConfigurationTab(QWidget):
                 # Test parameters
                 self.processing_strategy_combo.setCurrentText(config["test_parameters"]["processing_strategy"])
                 self.chunk_size_combo.setCurrentText(config["test_parameters"]["chunk_size"])
-                self.respect_sentences_check.setChecked(config["test_parameters"]["respect_sentences"])
-                self.include_stdlibs_check.setChecked(config["test_parameters"]["include_stdlibs"])
+                
+                # Handle the implementation options
+                if "use_stdlib" in config["test_parameters"] and "use_custom" in config["test_parameters"]:
+                    # New format
+                    self.use_stdlib_check.setChecked(config["test_parameters"]["use_stdlib"])
+                    self.use_custom_check.setChecked(config["test_parameters"]["use_custom"])
+                elif "include_stdlibs" in config["test_parameters"]:
+                    # Old format - set both checkboxes based on the old value
+                    include_stdlibs = config["test_parameters"]["include_stdlibs"]
+                    self.use_stdlib_check.setChecked(include_stdlibs)
+                    self.use_custom_check.setChecked(True)  # Always enable custom
+                else:
+                    # Default - enable both
+                    self.use_stdlib_check.setChecked(True)
+                    self.use_custom_check.setChecked(True)
+                
                 self.iterations_spin.setValue(config["test_parameters"]["iterations"])
                 
                 self.config_path = file_path
@@ -512,6 +535,11 @@ class ConfigurationTab(QWidget):
             QMessageBox.warning(self, "Warning", "Please select at least one encryption method.")
             return
         
+        # Check if at least one implementation option is selected
+        if not self.use_stdlib_check.isChecked() and not self.use_custom_check.isChecked():
+            QMessageBox.warning(self, "Warning", "Please select at least one implementation option (Standard Library or Custom).")
+            return
+        
         # Get dataset information - safer approach to find the dataset tab
         dataset_path = None
         dataset_info = {}
@@ -543,6 +571,7 @@ class ConfigurationTab(QWidget):
                             QMessageBox.warning(self, "Dataset Required", 
                                 "Please select a dataset in the Dataset tab before starting the tests.")
                             self.status_message.emit("Test not started: No dataset selected")
+                            print("Test not started: No dataset selected")
                             return
                         
                         # If a dataset is selected, get information about it
@@ -627,8 +656,8 @@ class ConfigurationTab(QWidget):
             "test_parameters": {
                 "processing_strategy": self.processing_strategy_combo.currentText(),
                 "chunk_size": self.chunk_size_combo.currentText(),
-                "respect_sentences": self.respect_sentences_check.isChecked(),
-                "include_stdlibs": self.include_stdlibs_check.isChecked(),
+                "use_stdlib": self.use_stdlib_check.isChecked(),
+                "use_custom": self.use_custom_check.isChecked(),
                 "iterations": self.iterations_spin.value(),
                 "dataset_path": dataset_path,
             },
@@ -649,16 +678,10 @@ class ConfigurationTab(QWidget):
             json.dump(config, f, indent=4)
         
         # Emit signal to indicate tests are starting
-        self.status_message.emit(f"Starting tests with configuration from {config_path}")
-        
-        # Notify user
-        QMessageBox.information(
-            self, 
-            "Tests Started", 
-            f"Tests are being started with the current configuration.\n\n"
-            f"Session directory: {session_dir}\n\n"
-            f"Results will be available in the Results Viewer tab when complete."
-        )
+        message = f"Starting tests with configuration from {config_path}"
+        self.status_message.emit(message)
+        print(f"\n=== TEST SESSION STARTED ===")
+        print(message)
         
         # If Python is selected, run Python tests directly
         if self.lang_python_check.isChecked():
@@ -671,21 +694,25 @@ class ConfigurationTab(QWidget):
                 os.chmod(python_test_script, 0o755)
                 
                 # Run the Python test script
-                self.progress_text.setText("Running Python encryption tests...")
+                message = "Running Python encryption tests..."
+                self.status_message.emit(message)
+                print(message)
+                
                 subprocess.run([python_test_script, config_path], check=True)
                 
                 # Update progress
-                self.progress_text.setText("Python tests completed successfully")
-                self.status_message.emit("Python tests completed successfully")
+                message = "Python tests completed successfully"
+                self.status_message.emit(message)
+                print(message)
             except subprocess.CalledProcessError as e:
                 error_msg = f"Python tests failed: {str(e)}"
-                self.progress_text.setText(error_msg)
                 self.status_message.emit(error_msg)
+                print(f"ERROR: {error_msg}")
                 QMessageBox.warning(self, "Test Error", error_msg)
             except Exception as e:
                 error_msg = f"Error running Python tests: {str(e)}"
-                self.progress_text.setText(error_msg)
                 self.status_message.emit(error_msg)
+                print(f"ERROR: {error_msg}")
                 QMessageBox.warning(self, "Test Error", error_msg)
         
         # For other languages, run the orchestrator
@@ -698,8 +725,9 @@ class ConfigurationTab(QWidget):
             try:
                 # Import and run the orchestrator
                 from src.orchestrator import main as run_orchestrator
-                self.status_message.emit("Launching orchestrator...")
-                self.progress_text.setText("Preparing benchmark...")
+                message = "Launching orchestrator..."
+                self.status_message.emit(message)
+                print(message)
                 
                 # Run in a separate thread to avoid blocking the UI
                 self.orchestrator_thread = OrchestrationThread(run_orchestrator)
@@ -708,29 +736,28 @@ class ConfigurationTab(QWidget):
                 self.orchestrator_thread.finished.connect(self._orchestration_finished)
                 self.orchestrator_thread.orchestration_complete.connect(self._orchestration_completed)
                 
-                # Connect progress updates to UI
-                self.orchestrator_thread.progress_update.connect(self._update_progress)
+                # Connect progress updates
+                self.orchestrator_thread.progress_update.connect(self._forward_progress_update)
                 
                 # Start the thread
                 self.orchestrator_thread.start()
             except Exception as e:
+                error_msg = f"Failed to start orchestrator: {str(e)}"
+                print(f"ERROR: {error_msg}")
                 QMessageBox.warning(
                     self,
                     "Orchestration Error",
-                    f"Failed to start orchestrator: {str(e)}\n\n"
+                    f"{error_msg}\n\n"
                     f"You may need to run it manually with:\n"
                     f"python -m src.orchestrator"
                 )
                 self.status_message.emit(f"Orchestration error: {str(e)}")
-                self.progress_text.setText(f"Error: {str(e)}")
     
-    def _update_progress(self, message):
-        """Update the progress display with new information."""
-        # Simply set the latest message - simpler than trying to maintain multiple lines
-        self.progress_text.setText(message)
-        
-        # Process events to ensure UI updates
-        QApplication.processEvents()
+    # Add a new method to forward progress updates to both UI and console
+    def _forward_progress_update(self, message):
+        """Forward progress updates to both UI and console."""
+        self.status_message.emit(message)
+        print(message)
 
     def _collect_pc_specs(self):
         """Collect information about the system."""
@@ -931,8 +958,10 @@ class ConfigurationTab(QWidget):
         return {
             "iterations": self.iterations_spin.value(),
             "processing_strategy": self.processing_strategy_combo.currentText(),
-            "respect_sentences": self.respect_sentences_check.isChecked(),
-            "include_stdlibs": self.include_stdlibs_check.isChecked(),
+            "chunk_size": self.chunk_size_combo.currentText(),
+            "use_stdlib": self.use_stdlib_check.isChecked(),
+            "use_custom": self.use_custom_check.isChecked(),
+            "ram_limit": ram_limit,
             "dataset_path": self.dataset_combo.currentData()
         }
 
@@ -949,10 +978,14 @@ class ConfigurationTab(QWidget):
     def _orchestration_completed(self, success, message):
         """Handle orchestration completion."""
         if success:
-            self.status_message.emit("Orchestration completed successfully. Check results tab.")
-            QMessageBox.information(self, "Orchestration Complete", 
-                                   "Benchmarking completed successfully.\n\nResults are now available in the Results tab.")
+            message = "Orchestration completed successfully. Check results tab."
+            self.status_message.emit(message)
+            print(f"\n=== TEST SESSION COMPLETED ===")
+            print(message)
         else:
-            self.status_message.emit(f"Orchestration error: {message}")
+            error_message = f"Orchestration error: {message}"
+            self.status_message.emit(error_message)
+            print(f"\n=== TEST SESSION FAILED ===")
+            print(error_message)
             QMessageBox.warning(self, "Orchestration Error", 
                                f"Benchmarking encountered an error:\n\n{message}") 
