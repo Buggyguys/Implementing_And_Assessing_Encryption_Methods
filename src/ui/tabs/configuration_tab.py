@@ -176,6 +176,26 @@ class ConfigurationTab(QWidget):
         self.rsa_key_size_combo = QComboBox()
         self.rsa_key_size_combo.addItems(["1024", "2048", "3072", "4096"])
         rsa_layout.addWidget(self.rsa_key_size_combo)
+        
+        rsa_layout.addWidget(QLabel("Padding:"))
+        self.rsa_padding_combo = QComboBox()
+        self.rsa_padding_combo.addItems(["OAEP", "PKCS#1 v1.5"])
+        self.rsa_padding_combo.setCurrentText("OAEP")  # OAEP is recommended default
+        rsa_layout.addWidget(self.rsa_padding_combo)
+        
+        # Add key reuse option for RSA
+        self.rsa_reuse_keys_check = QCheckBox("Reuse Keys")
+        self.rsa_reuse_keys_check.setToolTip("Generate a specific number of key pairs once and reuse them")
+        rsa_layout.addWidget(self.rsa_reuse_keys_check)
+        
+        rsa_layout.addWidget(QLabel("Key Sets:"))
+        self.rsa_key_sets_spin = QSpinBox()
+        self.rsa_key_sets_spin.setRange(1, 100)
+        self.rsa_key_sets_spin.setValue(10)  # Default to 10 sets
+        self.rsa_key_sets_spin.setEnabled(False)  # Disabled by default
+        self.rsa_key_sets_spin.setToolTip("Number of key pairs to generate and use")
+        rsa_layout.addWidget(self.rsa_key_sets_spin)
+        
         rsa_layout.addStretch()
         methods_layout.addLayout(rsa_layout)
         
@@ -310,6 +330,11 @@ class ConfigurationTab(QWidget):
         self.aes_check.toggled.connect(lambda checked: self.aes_key_size_combo.setEnabled(checked))
         self.aes_check.toggled.connect(lambda checked: self.aes_mode_combo.setEnabled(checked))
         self.rsa_check.toggled.connect(lambda checked: self.rsa_key_size_combo.setEnabled(checked))
+        self.rsa_check.toggled.connect(lambda checked: self.rsa_padding_combo.setEnabled(checked))
+        self.rsa_check.toggled.connect(lambda checked: self.rsa_reuse_keys_check.setEnabled(checked))
+        # Only enable the key sets spinbox if both RSA is enabled and reuse keys is checked
+        self.rsa_check.toggled.connect(self._update_rsa_controls)
+        self.rsa_reuse_keys_check.toggled.connect(self._update_rsa_controls)
         self.ecc_check.toggled.connect(lambda checked: self.ecc_curve_combo.setEnabled(checked))
         self.twofish_check.toggled.connect(lambda checked: self.twofish_key_size_combo.setEnabled(checked))
         self.twofish_check.toggled.connect(lambda checked: self.twofish_mode_combo.setEnabled(checked))
@@ -325,10 +350,20 @@ class ConfigurationTab(QWidget):
         self.aes_key_size_combo.setEnabled(self.aes_check.isChecked())
         self.aes_mode_combo.setEnabled(self.aes_check.isChecked())
         self.rsa_key_size_combo.setEnabled(self.rsa_check.isChecked())
+        self.rsa_padding_combo.setEnabled(self.rsa_check.isChecked())
+        self.rsa_reuse_keys_check.setEnabled(self.rsa_check.isChecked())
+        self._update_rsa_controls()
         self.ecc_curve_combo.setEnabled(self.ecc_check.isChecked())
         self.twofish_key_size_combo.setEnabled(self.twofish_check.isChecked())
         self.twofish_mode_combo.setEnabled(self.twofish_check.isChecked())
         self._update_chunk_size_visibility(self.processing_strategy_combo.currentText())
+    
+    def _update_rsa_controls(self):
+        """Update RSA controls' enabled state based on checkbox states."""
+        rsa_enabled = self.rsa_check.isChecked()
+        reuse_keys_enabled = self.rsa_reuse_keys_check.isChecked()
+        # Key sets spinbox is only enabled if both RSA is enabled and reuse keys is checked
+        self.rsa_key_sets_spin.setEnabled(rsa_enabled and reuse_keys_enabled)
     
     def _update_chunk_size_visibility(self, strategy):
         """Enable/disable chunk size selector based on processing strategy."""
@@ -368,7 +403,10 @@ class ConfigurationTab(QWidget):
                 },
                 "rsa": {
                     "enabled": self.rsa_check.isChecked(),
-                    "key_size": self.rsa_key_size_combo.currentText()
+                    "key_size": self.rsa_key_size_combo.currentText(),
+                    "padding": self.rsa_padding_combo.currentText(),
+                    "reuse_keys": self.rsa_reuse_keys_check.isChecked(),
+                    "key_sets": self.rsa_key_sets_spin.value()
                 },
                 "ecc": {
                     "enabled": self.ecc_check.isChecked(),
@@ -439,8 +477,25 @@ class ConfigurationTab(QWidget):
                 # Handle chacha20 config (and handle old configs with use_poly1305 field)
                 self.chacha_check.setChecked(config["encryption_methods"]["chacha20"]["enabled"])
                 
+                # Handle RSA configuration with backwards compatibility for padding
                 self.rsa_check.setChecked(config["encryption_methods"]["rsa"]["enabled"])
                 self.rsa_key_size_combo.setCurrentText(config["encryption_methods"]["rsa"]["key_size"])
+                if "padding" in config["encryption_methods"]["rsa"]:
+                    self.rsa_padding_combo.setCurrentText(config["encryption_methods"]["rsa"]["padding"])
+                else:
+                    # Default to OAEP for older config files
+                    self.rsa_padding_combo.setCurrentText("OAEP")
+                
+                # Handle RSA key reuse settings with backward compatibility
+                if "reuse_keys" in config["encryption_methods"]["rsa"]:
+                    self.rsa_reuse_keys_check.setChecked(config["encryption_methods"]["rsa"]["reuse_keys"])
+                else:
+                    self.rsa_reuse_keys_check.setChecked(False)
+                
+                if "key_sets" in config["encryption_methods"]["rsa"]:
+                    self.rsa_key_sets_spin.setValue(config["encryption_methods"]["rsa"]["key_sets"])
+                else:
+                    self.rsa_key_sets_spin.setValue(10)  # Default value
                 
                 self.ecc_check.setChecked(config["encryption_methods"]["ecc"]["enabled"])
                 self.ecc_curve_combo.setCurrentText(config["encryption_methods"]["ecc"]["curve"])
@@ -631,7 +686,10 @@ class ConfigurationTab(QWidget):
                 },
                 "rsa": {
                     "enabled": self.rsa_check.isChecked(),
-                    "key_size": self.rsa_key_size_combo.currentText()
+                    "key_size": self.rsa_key_size_combo.currentText(),
+                    "padding": self.rsa_padding_combo.currentText(),
+                    "reuse_keys": self.rsa_reuse_keys_check.isChecked(),
+                    "key_sets": self.rsa_key_sets_spin.value()
                 },
                 "ecc": {
                     "enabled": self.ecc_check.isChecked(),
@@ -945,15 +1003,36 @@ class ConfigurationTab(QWidget):
 
     def _generate_test_params(self):
         """Generate test parameters from current UI state."""
-        return {
+        params = {
             "iterations": self.iterations_spin.value(),
             "processing_strategy": self.processing_strategy_combo.currentText(),
             "chunk_size": self.chunk_size_combo.currentText(),
             "use_stdlib": self.use_stdlib_check.isChecked(),
             "use_custom": self.use_custom_check.isChecked(),
             "ram_limit": ram_limit,
-            "dataset_path": self.dataset_combo.currentData()
+            "dataset_path": self.dataset_combo.currentData(),
+            "encryption_settings": {
+                "aes": {
+                    "key_size": self.aes_key_size_combo.currentText(),
+                    "mode": self.aes_mode_combo.currentText()
+                },
+                "chacha20": {},
+                "rsa": {
+                    "key_size": self.rsa_key_size_combo.currentText(),
+                    "padding": self.rsa_padding_combo.currentText(),
+                    "reuse_keys": self.rsa_reuse_keys_check.isChecked(),
+                    "key_sets": self.rsa_key_sets_spin.value() if self.rsa_reuse_keys_check.isChecked() else 1
+                },
+                "ecc": {
+                    "curve": self.ecc_curve_combo.currentText()
+                },
+                "twofish": {
+                    "key_size": self.twofish_key_size_combo.currentText(),
+                    "mode": self.twofish_mode_combo.currentText()
+                }
+            }
         }
+        return params
 
     def _orchestration_finished(self):
         """Handle thread finished signal (always called)."""

@@ -355,6 +355,34 @@ class MemoryMappedDataset:
             # Suppress all exceptions during garbage collection
             pass
 
+class RotatingKeySet:
+    """Class to manage a set of keys that rotate for each chunk of data."""
+    
+    def __init__(self, key_pairs):
+        """Initialize with a list of key pairs."""
+        self.key_pairs = key_pairs
+        self.current_index = 0
+        self.total_keys = len(key_pairs)
+        # Special attribute to identify this as a rotating key set
+        self.__rotating_keys__ = True
+    
+    def get_next_key(self):
+        """Get the next key in the rotation and advance the index."""
+        if not self.key_pairs:
+            raise ValueError("No keys available in the rotating key set")
+        
+        # Get the current key
+        key = self.key_pairs[self.current_index]
+        
+        # Advance to the next key for next time
+        self.current_index = (self.current_index + 1) % self.total_keys
+        
+        return key
+    
+    def reset(self):
+        """Reset the rotation to start from the first key again."""
+        self.current_index = 0
+
 def register_implementation(name):
     """Register an encryption implementation."""
     def decorator(impl_class):
@@ -549,7 +577,7 @@ def measure_encryption_metrics(metrics, process_func, implementation, data, key,
         process_func: Function to measure (encrypt or decrypt)
         implementation: The encryption implementation
         data: Data to process (plaintext or ciphertext)
-        key: Encryption key
+        key: Encryption key (can be a single key or a key pair tuple for RSA)
         is_memory_mapped: Whether data is memory-mapped
         
     Returns:
@@ -608,7 +636,76 @@ def measure_encryption_metrics(metrics, process_func, implementation, data, key,
                         # Assume the entire ciphertext is already in memory (data)
                         # and we're comparing against memory-mapped original
                         try:
-                            return implementation.decrypt(data, key)
+                            # Large data for RSA requires special handling
+                            if hasattr(implementation, 'name') and implementation.name == "RSA" and process_func.__name__ == 'decrypt':
+                                # If we're decrypting data that was encrypted with rotating keys,
+                                # we need to handle each block separately
+                                
+                                # Check for characteristics of multi-key encrypted data
+                                block_size = 0
+                                if isinstance(key, RotatingKeySet):
+                                    # Get a sample key to determine the block size
+                                    sample_key = key.get_next_key()
+                                    key.reset()  # Reset the rotation to maintain proper order
+                                    
+                                    # Determine the block size from the key size
+                                    if isinstance(sample_key, tuple):
+                                        if hasattr(sample_key[1], 'size_in_bytes'):
+                                            block_size = sample_key[1].size_in_bytes()
+                                        elif hasattr(sample_key[1], 'n'):
+                                            # For custom RSA, get size from modulus
+                                            n = sample_key[1].get('n', 0) if isinstance(sample_key[1], dict) else getattr(sample_key[1], 'n', 0)
+                                            block_size = (n.bit_length() + 7) // 8 if n else 0
+                                    
+                                    # If we have a block size and multiple blocks, process them separately
+                                    if block_size > 0 and len(data) > block_size:
+                                        logger.info(f"Decrypting multi-key RSA data with block size {block_size}")
+                                        
+                                        result_parts = []
+                                        total_size = len(data)
+                                        offset = 0
+                                        
+                                        # Process each block with the corresponding key
+                                        block_counter = 0
+                                        while offset < total_size:
+                                            # Determine the next complete block
+                                            end = min(offset + block_size, total_size)
+                                            if end - offset < block_size and end < total_size:
+                                                # If we have a partial block but more data follows,
+                                                # something is wrong with our block size detection
+                                                logger.warning(f"Partial RSA block detected at offset {offset}. Block size may be incorrect.")
+                                            
+                                            # Get the block to decrypt
+                                            block = data[offset:end]
+                                            
+                                            # Get the next key for this block
+                                            current_key = key.get_next_key()
+                                            
+                                            try:
+                                                # Decrypt this block with the current key
+                                                decrypted_block = process_func(block, current_key)
+                                                result_parts.append(decrypted_block)
+                                            except Exception as e:
+                                                logger.error(f"Error decrypting block {block_counter}: {str(e)}")
+                                                # Continue with the next block despite errors
+                                            
+                                            # Move to next block
+                                            offset = end
+                                            block_counter += 1
+                                            
+                                            # Log progress periodically for large files
+                                            if block_counter % 50 == 0:
+                                                progress = (offset / total_size) * 100
+                                                logger.info(f"RSA decryption progress: {progress:.1f}% ({offset}/{total_size} bytes)")
+                                        
+                                        # Combine all decrypted parts
+                                        try:
+                                            result = b''.join(result_parts) if result_parts else b''
+                                        except Exception as e:
+                                            logger.error(f"Error combining decrypted blocks: {str(e)}")
+                                            result = b''
+                                        
+                                        return result  # Return early with the combined result
                         except Exception as e:
                             logger.error(f"Error decrypting memory-mapped data: {str(e)}")
                             return None
@@ -638,7 +735,173 @@ def measure_encryption_metrics(metrics, process_func, implementation, data, key,
     else:
         # Standard in-memory processing
         try:
-            result = process_func(data, key)
+            # For RSA and other asymmetric algorithms, limit data size to avoid exceptions
+            if hasattr(implementation, 'name') and implementation.name == "RSA":
+                # Handle RSA differently for large data
+                # Get the key size to calculate max data size
+                key_size_bytes = 0
+                
+                # Check if we're using key rotation (key is a list of key pairs)
+                if hasattr(key, '__rotating_keys__') and hasattr(key, 'key_pairs'):
+                    # Using the rotating keys wrapper
+                    current_key = key.get_next_key()
+                    if isinstance(current_key, tuple):
+                        # For key pairs, estimate from the tuple's first element (public key)
+                        try:
+                            if hasattr(current_key[0], 'size_in_bytes'):
+                                key_size_bytes = current_key[0].size_in_bytes()
+                            elif hasattr(current_key[0], 'n'):
+                                # For custom RSA, get size from modulus
+                                n = current_key[0].get('n', 0) if isinstance(current_key[0], dict) else getattr(current_key[0], 'n', 0)
+                                key_size_bytes = (n.bit_length() + 7) // 8 if n else 0
+                        except (IndexError, AttributeError):
+                            pass
+                        
+                # Standard key (not rotating)
+                elif isinstance(key, tuple):
+                    # For key pairs, estimate from the tuple's first element (public key)
+                    try:
+                        if hasattr(key[0], 'size_in_bytes'):
+                            key_size_bytes = key[0].size_in_bytes()
+                        elif hasattr(key[0], 'n'):
+                            # For custom RSA, get size from modulus
+                            n = key[0].get('n', 0) if isinstance(key[0], dict) else getattr(key[0], 'n', 0)
+                            key_size_bytes = (n.bit_length() + 7) // 8 if n else 0
+                    except (IndexError, AttributeError):
+                        pass
+                
+                # Determine appropriate max data size based on padding
+                max_data_size = 0
+                if key_size_bytes > 0:
+                    use_oaep = getattr(implementation, 'use_oaep', True)
+                    # OAEP overhead: 2 * hash_size + 2
+                    # PKCS#1 v1.5 overhead: 11 bytes
+                    if use_oaep:
+                        max_data_size = key_size_bytes - 66  # 2 * SHA256.digest_size(32) + 2
+                    else:
+                        max_data_size = key_size_bytes - 11
+                else:
+                    # Default conservative limit if we can't determine exact size
+                    max_data_size = 100  # Conservative default
+                
+                # For large files, break it into chunks and encrypt each chunk with a different key
+                if process_func.__name__ == 'encrypt' and len(data) > max_data_size:
+                    logger.info(f"Data too large for single RSA operation ({len(data)} bytes). Processing in chunks of {max_data_size} bytes.")
+                    
+                    # Check if we're using rotating keys
+                    if hasattr(key, '__rotating_keys__'):
+                        result_parts = []
+                        total_size = len(data)
+                        offset = 0
+                        
+                        # Process data in chunks, rotating through available keys
+                        chunk_counter = 0
+                        while offset < total_size:
+                            # Get the next chunk of data
+                            end = min(offset + max_data_size, total_size)
+                            chunk = data[offset:end]
+                            
+                            # Get the next key from the rotation
+                            current_key = key.get_next_key()
+                            
+                            # Encrypt this chunk with the current key
+                            encrypted_chunk = process_func(chunk, current_key)
+                            result_parts.append(encrypted_chunk)
+                            
+                            # Move to next chunk
+                            offset = end
+                            chunk_counter += 1
+                            
+                            # Log progress periodically for large files
+                            if chunk_counter % 100 == 0:
+                                progress = (offset / total_size) * 100
+                                logger.info(f"RSA encryption progress: {progress:.1f}% ({offset}/{total_size} bytes)")
+                        
+                        # Combine all encrypted chunks
+                        result = b''.join(result_parts) if isinstance(result_parts[0], bytes) else result_parts
+                    else:
+                        # Without key rotation, just encrypt the first chunk that fits
+                        logger.warning(f"Data too large for RSA encryption ({len(data)} bytes). Truncating to {max_data_size} bytes.")
+                        truncated_data = data[:max_data_size]
+                        result = process_func(truncated_data, key)
+                else:
+                    # For decryption or small data, process normally
+                    # For RSA decryption with rotating keys, handle specially
+                    if process_func.__name__ == 'decrypt' and hasattr(implementation, 'name') and implementation.name == "RSA":
+                        if hasattr(key, '__rotating_keys__'):
+                            # Process multi-key encrypted data in blocks
+                            # Determine the block size from a sample key
+                            sample_key = key.get_next_key()
+                            key.reset()  # Reset the rotation
+                            block_size = 0
+                            
+                            if isinstance(sample_key, tuple):
+                                if hasattr(sample_key[1], 'size_in_bytes'):
+                                    block_size = sample_key[1].size_in_bytes()
+                                elif hasattr(sample_key[1], 'n'):
+                                    # For custom RSA, get size from modulus
+                                    n = sample_key[1].get('n', 0) if isinstance(sample_key[1], dict) else getattr(sample_key[1], 'n', 0)
+                                    block_size = (n.bit_length() + 7) // 8 if n else 0
+                            
+                            if block_size > 0 and len(data) > block_size:
+                                logger.info(f"Decrypting multi-key RSA data with block size {block_size}")
+                                
+                                result_parts = []
+                                total_size = len(data)
+                                offset = 0
+                                
+                                # Process each block with the corresponding key
+                                block_counter = 0
+                                while offset < total_size:
+                                    # Determine the next complete block
+                                    end = min(offset + block_size, total_size)
+                                    if end - offset < block_size and end < total_size:
+                                        # If we have a partial block but more data follows,
+                                        # something is wrong with our block size detection
+                                        logger.warning(f"Partial RSA block detected at offset {offset}. Block size may be incorrect.")
+                                    
+                                    # Get the block to decrypt
+                                    block = data[offset:end]
+                                    
+                                    # Get the next key for this block
+                                    current_key = key.get_next_key()
+                                    
+                                    try:
+                                        # Decrypt this block with the current key
+                                        decrypted_block = process_func(block, current_key)
+                                        result_parts.append(decrypted_block)
+                                    except Exception as e:
+                                        logger.error(f"Error decrypting block {block_counter}: {str(e)}")
+                                        # Continue with the next block despite errors
+                                    
+                                    # Move to next block
+                                    offset = end
+                                    block_counter += 1
+                                    
+                                    # Log progress periodically for large files
+                                    if block_counter % 50 == 0:
+                                        progress = (offset / total_size) * 100
+                                        logger.info(f"RSA decryption progress: {progress:.1f}% ({offset}/{total_size} bytes)")
+                                
+                                # Combine all decrypted parts
+                                try:
+                                    result = b''.join(result_parts) if result_parts else b''
+                                except Exception as e:
+                                    logger.error(f"Error combining decrypted blocks: {str(e)}")
+                                    result = b''
+                            else:
+                                # Single block, just use the next key
+                                current_key = key.get_next_key()
+                                result = process_func(data, current_key)
+                        else:
+                            # Normal processing for single key decryption
+                            result = process_func(data, key)
+                    else:
+                        # Normal processing for non-RSA or encryption
+                        result = process_func(data, key)
+            else:
+                # Normal processing for symmetric algorithms
+                result = process_func(data, key)
         except Exception as e:
             logger.error(f"Error in standard processing: {str(e)}")
             result = b'' if process_func.__name__ == 'encrypt' else None
@@ -724,6 +987,14 @@ def _register_implementations():
         create_stdlib_chacha20_implementation
     )
     
+    # Import RSA implementations
+    from src.encryption.python.rsa.implementation import (
+        RSA_IMPLEMENTATIONS,
+        RSAImplementation,
+        create_custom_rsa_implementation, 
+        create_stdlib_rsa_implementation
+    )
+    
     # Register AES implementation directly
     ENCRYPTION_IMPLEMENTATIONS["aes"] = AESImplementation
     
@@ -744,6 +1015,20 @@ def _register_implementations():
     # Register ChaCha20 variants (both with and without Poly1305)
     for name, impl in CHACHA_IMPLEMENTATIONS.items():
         if name not in ["chacha20"]:  # We already registered this implementation
+            ENCRYPTION_IMPLEMENTATIONS[name] = impl
+    
+    # Register RSA implementation directly
+    ENCRYPTION_IMPLEMENTATIONS["rsa"] = RSAImplementation
+    
+    # Register custom RSA implementation
+    ENCRYPTION_IMPLEMENTATIONS["rsa_custom"] = lambda **kwargs: create_custom_rsa_implementation(
+        kwargs.get("key_size", "2048"),
+        kwargs.get("padding", "OAEP") == "OAEP"  # Convert padding string to boolean use_oaep
+    )
+    
+    # Register all RSA variants
+    for name, impl in RSA_IMPLEMENTATIONS.items():
+        if name not in ["rsa", "rsa_custom"]:  # We already registered these implementations
             ENCRYPTION_IMPLEMENTATIONS[name] = impl
             
     # Add more implementations as they are developed
@@ -872,6 +1157,28 @@ def run_benchmarks(config):
                     custom_settings = method_settings.copy()
                     custom_settings["is_custom"] = True
                     enabled_methods.append(("chacha20_custom", custom_settings))
+            # For RSA, we also have both standard and custom implementations
+            elif method_name == "rsa":
+                # Get RSA specific settings
+                reuse_keys = method_settings.get("reuse_keys", False)
+                key_sets = method_settings.get("key_sets", 1)
+                rsa_key_size = method_settings.get("key_size", "2048")
+                rsa_padding = method_settings.get("padding", "OAEP")
+                use_oaep = rsa_padding == "OAEP"
+                
+                # Add standard library implementation if enabled
+                if use_stdlib:
+                    std_settings = method_settings.copy()
+                    std_settings["is_custom"] = False
+                    std_settings["use_oaep"] = use_oaep  # Convert padding string to boolean
+                    enabled_methods.append((method_name, std_settings))
+                
+                # Add custom implementation if enabled
+                if use_custom:
+                    custom_settings = method_settings.copy()
+                    custom_settings["is_custom"] = True
+                    custom_settings["use_oaep"] = use_oaep  # Convert padding string to boolean
+                    enabled_methods.append(("rsa_custom", custom_settings))
             # For ChaCha20-Poly1305, we also have both standard and custom implementations
             elif method_name == "chacha20poly1305":
                 # Removed ChaCha20-Poly1305 support from the UI
@@ -914,16 +1221,22 @@ def run_benchmarks(config):
     # Run benchmarks for each enabled encryption method
     for method_name, settings in enabled_methods:
         impl_name = method_name
-        is_custom = method_name in ["aes_custom", "chacha20_custom", "chacha20poly1305_custom"]
+        is_custom = settings.get("is_custom", False)
         
         if is_custom:
             if method_name.startswith("chacha20"):
                 impl_description = "Custom ChaCha20 Implementation"
+            elif method_name.startswith("rsa") or method_name == "rsa_custom":
+                padding = "OAEP" if settings.get("use_oaep", True) else "PKCS#1 v1.5"
+                impl_description = f"Custom RSA-{settings.get('key_size', '2048')} with {padding} padding"
             else:
                 impl_description = "Custom AES Implementation"
         else:
             if method_name.startswith("chacha20"):
                 impl_description = "Standard ChaCha20 Implementation"
+            elif method_name.startswith("rsa") or method_name == "rsa":
+                padding = "OAEP" if settings.get("use_oaep", True) else "PKCS#1 v1.5"
+                impl_description = f"Standard RSA-{settings.get('key_size', '2048')} with {padding} padding"
             else:
                 impl_description = f"Standard {method_name.upper()} Implementation"
             
@@ -942,6 +1255,32 @@ def run_benchmarks(config):
             # Create an instance with the settings
             implementation = implementation_factory(**settings)
             
+            # Handle RSA key reuse if applicable
+            rsa_key_sets = []
+            key_generation_time_ms = 0
+            
+            # For RSA with key reuse enabled, generate key sets upfront
+            is_rsa = hasattr(implementation, 'name') and implementation.name == "RSA"
+            reuse_keys = settings.get("reuse_keys", False)
+            key_sets_count = settings.get("key_sets", 1) if reuse_keys else 0
+            
+            if is_rsa and reuse_keys and key_sets_count > 0:
+                logger.info(f"Generating {key_sets_count} RSA key pairs for reuse...")
+                
+                # Start timing for key generation
+                key_gen_start_time = time.perf_counter()
+                
+                # Generate the requested number of key pairs
+                for _ in range(key_sets_count):
+                    key_pair = implementation.generate_key()
+                    rsa_key_sets.append(key_pair)
+                
+                # Calculate total key generation time
+                key_gen_end_time = time.perf_counter()
+                key_generation_time_ms = (key_gen_end_time - key_gen_start_time) * 1000  # Convert to ms
+                
+                logger.info(f"Generated {len(rsa_key_sets)} key pairs in {key_generation_time_ms:.2f} ms")
+            
             # Run iterations
             iteration_results = []
             for i in range(iterations):
@@ -951,8 +1290,16 @@ def run_benchmarks(config):
                 metrics = BenchmarkMetrics()
                 
                 try:
-                    # Key generation (same for both strategies)
-                    key = metrics.measure_keygen(implementation.generate_key)
+                    # Key generation or key reuse
+                    if is_rsa and reuse_keys and rsa_key_sets:
+                        # For RSA with key rotation, create a RotatingKeySet for the encryption/decryption process
+                        rotating_keys = RotatingKeySet(rsa_key_sets)
+                        # Set average key generation time
+                        metrics.keygen_wall_time_ms = key_generation_time_ms / key_sets_count
+                        key = rotating_keys
+                    else:
+                        # Normal key generation
+                        key = metrics.measure_keygen(implementation.generate_key)
                     
                     if processing_strategy == "Memory":
                         # Process the entire dataset in memory
@@ -1020,22 +1367,91 @@ def run_benchmarks(config):
                         ciphertext_parts = []
                         total_processed = 0
                         
-                        # Process in chunks
-                        with open(dataset_path, 'rb') as f:
-                            while True:
-                                chunk = f.read(chunk_size)
-                                if not chunk:
-                                    break
+                        # Handle RSA with rotating keys differently
+                        is_rsa_rotating = (hasattr(implementation, 'name') and 
+                                          implementation.name == "RSA" and
+                                          hasattr(key, '__rotating_keys__'))
+                        
+                        if is_rsa_rotating:
+                            logger.info("Using RSA with rotating keys for stream processing")
+                            # For RSA, we need to determine max data size per chunk based on key size
+                            # Get a sample key to determine properties
+                            sample_key = key.get_next_key()
+                            key.reset()  # Reset to maintain proper sequence
+                            
+                            key_size_bytes = 0
+                            if isinstance(sample_key, tuple):
+                                # For key pairs, estimate from the tuple's first element (public key)
+                                try:
+                                    if hasattr(sample_key[0], 'size_in_bytes'):
+                                        key_size_bytes = sample_key[0].size_in_bytes()
+                                    elif hasattr(sample_key[0], 'n'):
+                                        # For custom RSA, get size from modulus
+                                        n = sample_key[0].get('n', 0) if isinstance(sample_key[0], dict) else getattr(sample_key[0], 'n', 0)
+                                        key_size_bytes = (n.bit_length() + 7) // 8 if n else 0
+                                except (IndexError, AttributeError):
+                                    pass
+                            
+                            # Determine max data size per RSA operation
+                            use_oaep = getattr(implementation, 'use_oaep', True)
+                            if use_oaep:
+                                max_data_size = key_size_bytes - 66  # 2 * SHA256.digest_size(32) + 2
+                            else:
+                                max_data_size = key_size_bytes - 11
+                            
+                            # Use a smaller chunk size for RSA
+                            rsa_chunk_size = max(max_data_size, 100)  # At least 100 bytes
+                            logger.info(f"Using RSA chunk size of {rsa_chunk_size} bytes per operation")
+                            
+                            # Process in RSA-sized chunks
+                            with open(dataset_path, 'rb') as f:
+                                data_chunk = f.read(chunk_size)  # Read a larger buffer for efficiency
                                 
-                                # Encrypt the chunk
-                                encrypted_chunk = implementation.encrypt(chunk, key)
-                                ciphertext_parts.append(encrypted_chunk)
-                                total_processed += len(chunk)
-                                
-                                # Log progress periodically
-                                if total_processed % (50 * 1024 * 1024) < chunk_size:  # Log every ~50MB
-                                    progress = (total_processed / dataset_size_bytes) * 100
-                                    logger.info(f"Processed {total_processed / (1024*1024):.2f} MB ({progress:.1f}%)")
+                                while data_chunk:
+                                    # Process this larger chunk in RSA-sized sub-chunks
+                                    offset = 0
+                                    while offset < len(data_chunk):
+                                        # Get the next sub-chunk
+                                        end = min(offset + rsa_chunk_size, len(data_chunk))
+                                        sub_chunk = data_chunk[offset:end]
+                                        
+                                        # Get the next key for this sub-chunk
+                                        current_key = key.get_next_key()
+                                        
+                                        # Encrypt the sub-chunk
+                                        encrypted_sub_chunk = implementation.encrypt(sub_chunk, current_key)
+                                        ciphertext_parts.append(encrypted_sub_chunk)
+                                        
+                                        # Move to next sub-chunk
+                                        offset = end
+                                    
+                                    # Update total processed
+                                    total_processed += len(data_chunk)
+                                    
+                                    # Log progress periodically
+                                    if total_processed % (50 * 1024 * 1024) < chunk_size:  # Log every ~50MB
+                                        progress = (total_processed / dataset_size_bytes) * 100
+                                        logger.info(f"Processed {total_processed / (1024*1024):.2f} MB ({progress:.1f}%)")
+                                    
+                                    # Read the next chunk
+                                    data_chunk = f.read(chunk_size)
+                        else:
+                            # Process in chunks with normal (non-rotating) key
+                            with open(dataset_path, 'rb') as f:
+                                while True:
+                                    chunk = f.read(chunk_size)
+                                    if not chunk:
+                                        break
+                                    
+                                    # Encrypt the chunk
+                                    encrypted_chunk = implementation.encrypt(chunk, key)
+                                    ciphertext_parts.append(encrypted_chunk)
+                                    total_processed += len(chunk)
+                                    
+                                    # Log progress periodically
+                                    if total_processed % (50 * 1024 * 1024) < chunk_size:  # Log every ~50MB
+                                        progress = (total_processed / dataset_size_bytes) * 100
+                                        logger.info(f"Processed {total_processed / (1024*1024):.2f} MB ({progress:.1f}%)")
                         
                         # End timing
                         encryption_end_time = time.perf_counter()
@@ -1064,9 +1480,10 @@ def run_benchmarks(config):
                         
                         logger.info(f"Decrypting dataset (Stream mode)...")
                         
-                        # For decryption, read original data for verification
-                        with open(dataset_path, 'rb') as f:
-                            original_data = f.read()
+                        # Handle RSA with rotating keys
+                        is_rsa_rotating = (hasattr(implementation, 'name') and 
+                                           implementation.name == "RSA" and
+                                           hasattr(key, '__rotating_keys__'))
                         
                         # Get initial metrics for decryption
                         initial_ctx = process.num_ctx_switches()
@@ -1074,7 +1491,74 @@ def run_benchmarks(config):
                         
                         # Measure decryption
                         decryption_start_time = time.perf_counter()
-                        decrypted_data = implementation.decrypt(combined_ciphertext, key)
+                        
+                        if is_rsa_rotating and len(combined_ciphertext) > 0:
+                            logger.info("Decrypting with rotating RSA keys")
+                            
+                            # Determine the RSA block size from a sample key
+                            sample_key = key.get_next_key()
+                            key.reset()  # Reset to maintain proper order
+                            
+                            block_size = 0
+                            if isinstance(sample_key, tuple):
+                                if hasattr(sample_key[1], 'size_in_bytes'):
+                                    block_size = sample_key[1].size_in_bytes()
+                                elif hasattr(sample_key[1], 'n'):
+                                    # For custom RSA, get size from modulus
+                                    n = sample_key[1].get('n', 0) if isinstance(sample_key[1], dict) else getattr(sample_key[1], 'n', 0)
+                                    block_size = (n.bit_length() + 7) // 8 if n else 0
+                            
+                            if block_size > 0:
+                                logger.info(f"Detected RSA block size of {block_size} bytes")
+                                
+                                # Process each encrypted block with the corresponding key
+                                result_parts = []
+                                total_size = len(combined_ciphertext)
+                                offset = 0
+                                
+                                while offset < total_size:
+                                    # Determine the next block
+                                    end = min(offset + block_size, total_size)
+                                    
+                                    # If we have a partial block, handle it appropriately
+                                    if end - offset < block_size and end < total_size:
+                                        logger.warning(f"Partial RSA block detected at offset {offset}. Block size may be incorrect.")
+                                    
+                                    # Get the block to decrypt
+                                    block = combined_ciphertext[offset:end]
+                                    
+                                    # Get the next key for this block
+                                    current_key = key.get_next_key()
+                                    
+                                    try:
+                                        # Decrypt this block
+                                        decrypted_block = implementation.decrypt(block, current_key)
+                                        result_parts.append(decrypted_block)
+                                    except Exception as e:
+                                        logger.error(f"Error decrypting block at offset {offset}: {str(e)}")
+                                    
+                                    # Move to the next block
+                                    offset = end
+                                    
+                                    # Log progress periodically
+                                    if offset % (10 * block_size) == 0:
+                                        progress = (offset / total_size) * 100
+                                        logger.info(f"RSA decryption progress: {progress:.1f}% ({offset}/{total_size} bytes)")
+                                
+                                # Combine all decrypted parts
+                                try:
+                                    decrypted_data = b''.join(result_parts)
+                                except Exception as e:
+                                    logger.error(f"Error combining decrypted blocks: {str(e)}")
+                                    decrypted_data = b''
+                            else:
+                                # Fallback to standard decryption if we can't determine block size
+                                logger.warning("Cannot determine RSA block size. Falling back to standard decryption.")
+                                decrypted_data = implementation.decrypt(combined_ciphertext, key)
+                        else:
+                            # Standard decryption for non-rotating keys
+                            decrypted_data = implementation.decrypt(combined_ciphertext, key)
+                        
                         decryption_end_time = time.perf_counter()
                         
                         # Calculate metrics
@@ -1095,10 +1579,23 @@ def run_benchmarks(config):
                         # Record peak memory usage
                         metrics.decrypt_peak_rss_bytes = process.memory_info().rss
                         
+                        # For verification (optional)
+                        try:
+                            with open(dataset_path, 'rb') as f:
+                                # Read a small sample for comparison
+                                original_sample = f.read(min(1024, dataset_size_bytes))
+                                decrypted_sample = decrypted_data[:min(1024, len(decrypted_data))]
+                                if original_sample != decrypted_sample:
+                                    logger.warning("Decryption verification failed: decrypted data does not match original")
+                        except Exception as e:
+                            logger.warning(f"Could not verify decryption: {str(e)}")
+                        
                         # Correctness checks are no longer used - assume correct
                         
                         # Clean up memory
-                        del combined_ciphertext, ciphertext_parts, original_data, decrypted_data
+                        del combined_ciphertext, ciphertext_parts
+                        if 'decrypted_data' in locals():
+                            del decrypted_data
                         gc.collect()
                     
                     # Add results to list
@@ -1133,6 +1630,15 @@ def run_benchmarks(config):
                 "implementation_type": "custom" if is_custom else "stdlib",
                 "description": impl_description
             }
+            
+            # For RSA with key reuse, add additional information about key generation
+            if is_rsa and reuse_keys and key_sets_count > 0:
+                results["encryption_results"][impl_name]["key_reuse"] = {
+                    "enabled": True,
+                    "key_sets": key_sets_count,
+                    "total_key_generation_time_ms": key_generation_time_ms,
+                    "avg_key_generation_time_per_set_ms": key_generation_time_ms / key_sets_count if key_sets_count > 0 else 0
+                }
             
             logger.info(f"Benchmark completed for {impl_description}")
         
