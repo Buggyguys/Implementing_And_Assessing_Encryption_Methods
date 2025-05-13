@@ -510,6 +510,10 @@ def calculate_aggregated_metrics(iterations_data, dataset_size_bytes):
     if avg_decrypt_wall_time_ms > 0:
         avg_throughput_decrypt_mb_per_s = (dataset_size_bytes / (1024 * 1024)) / (avg_decrypt_wall_time_ms / 1000.0)
     
+    # Calculate encryption and decryption time in seconds directly from wall time
+    encryption_time_seconds = avg_encrypt_wall_time_ms / 1000.0
+    decryption_time_seconds = avg_decrypt_wall_time_ms / 1000.0
+    
     # Construct and return the aggregated metrics dictionary
     return {
         "iterations_completed": iterations_completed,
@@ -530,7 +534,9 @@ def calculate_aggregated_metrics(iterations_data, dataset_size_bytes):
         "avg_ciphertext_total_bytes": avg_ciphertext_total_bytes,
         "avg_ciphertext_overhead_percent": avg_ciphertext_overhead_percent,
         "avg_throughput_encrypt_mb_per_s": avg_throughput_encrypt_mb_per_s,
-        "avg_throughput_decrypt_mb_per_s": avg_throughput_decrypt_mb_per_s
+        "avg_throughput_decrypt_mb_per_s": avg_throughput_decrypt_mb_per_s,
+        "encryption_time_seconds": encryption_time_seconds,
+        "decryption_time_seconds": decryption_time_seconds
     }
 
 def measure_encryption_metrics(metrics, process_func, implementation, data, key, is_memory_mapped=False):
@@ -710,6 +716,14 @@ def _register_implementations():
         create_stdlib_aes_implementation
     )
     
+    # Import ChaCha20 implementations
+    from src.encryption.python.chacha.implementation import (
+        CHACHA_IMPLEMENTATIONS,
+        ChaCha20Implementation,
+        create_custom_chacha20_implementation,
+        create_stdlib_chacha20_implementation
+    )
+    
     # Register AES implementation directly
     ENCRYPTION_IMPLEMENTATIONS["aes"] = AESImplementation
     
@@ -722,6 +736,14 @@ def _register_implementations():
     # Register all AES variants
     for name, impl in AES_IMPLEMENTATIONS.items():
         if name not in ["aes", "aes_custom"]:  # We already registered these implementations
+            ENCRYPTION_IMPLEMENTATIONS[name] = impl
+    
+    # Register ChaCha20 implementation directly
+    ENCRYPTION_IMPLEMENTATIONS["chacha20"] = ChaCha20Implementation
+    
+    # Register ChaCha20 variants (both with and without Poly1305)
+    for name, impl in CHACHA_IMPLEMENTATIONS.items():
+        if name not in ["chacha20"]:  # We already registered this implementation
             ENCRYPTION_IMPLEMENTATIONS[name] = impl
             
     # Add more implementations as they are developed
@@ -837,6 +859,24 @@ def run_benchmarks(config):
                     custom_settings = method_settings.copy()
                     custom_settings["is_custom"] = True
                     enabled_methods.append(("aes_custom", custom_settings))
+            # For ChaCha20, we also have both standard and custom implementations
+            elif method_name == "chacha20":
+                # Add standard library implementation if enabled
+                if use_stdlib:
+                    std_settings = method_settings.copy()
+                    std_settings["is_custom"] = False
+                    enabled_methods.append((method_name, std_settings))
+                
+                # Add custom implementation if enabled
+                if use_custom:
+                    custom_settings = method_settings.copy()
+                    custom_settings["is_custom"] = True
+                    enabled_methods.append(("chacha20_custom", custom_settings))
+            # For ChaCha20-Poly1305, we also have both standard and custom implementations
+            elif method_name == "chacha20poly1305":
+                # Removed ChaCha20-Poly1305 support from the UI
+                logger.warning("ChaCha20-Poly1305 support has been removed. Skipping.")
+                continue
             else:
                 # For other methods, just add them as is
                 enabled_methods.append((method_name, method_settings))
@@ -874,12 +914,18 @@ def run_benchmarks(config):
     # Run benchmarks for each enabled encryption method
     for method_name, settings in enabled_methods:
         impl_name = method_name
-        is_custom = method_name == "aes_custom"
+        is_custom = method_name in ["aes_custom", "chacha20_custom", "chacha20poly1305_custom"]
         
         if is_custom:
-            impl_description = "Custom AES Implementation"
+            if method_name.startswith("chacha20"):
+                impl_description = "Custom ChaCha20 Implementation"
+            else:
+                impl_description = "Custom AES Implementation"
         else:
-            impl_description = f"Standard {method_name.upper()} Implementation"
+            if method_name.startswith("chacha20"):
+                impl_description = "Standard ChaCha20 Implementation"
+            else:
+                impl_description = f"Standard {method_name.upper()} Implementation"
             
         logger.info(f"Running benchmark for {impl_description}")
         

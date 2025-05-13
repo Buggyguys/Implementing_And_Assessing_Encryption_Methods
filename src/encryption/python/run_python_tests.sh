@@ -34,10 +34,18 @@ else
     echo "PyPy3 not found, using standard Python3 interpreter"
 fi
 
-# Instead of creating a separate file, directly check registered implementations
-$PYTHON_CMD -c "from src.encryption.python.aes import AESImplementation; from src.encryption.python.python_core import ENCRYPTION_IMPLEMENTATIONS; print(f\"Registered implementations in preload: {list(ENCRYPTION_IMPLEMENTATIONS.keys())}\")"
+# Check registered implementations - create more descriptive display
+$PYTHON_CMD -c "
+from src.encryption.python.python_core import _register_implementations, ENCRYPTION_IMPLEMENTATIONS
+_register_implementations()
+print('\\nRegistered encryption implementations:')
+print('--------------------------------------')
+for name in sorted(ENCRYPTION_IMPLEMENTATIONS.keys()):
+    print(f'- {name}')
+print('--------------------------------------\\n')
+"
 
-# Run the Python core directly using the specified Python interpreter
+# Run the Python core with the specified configuration
 $PYTHON_CMD -m src.encryption.python.python_core "$CONFIG_FILE"
 
 echo "Python encryption tests completed"

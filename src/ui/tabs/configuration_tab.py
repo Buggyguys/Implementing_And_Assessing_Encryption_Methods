@@ -164,12 +164,6 @@ class ConfigurationTab(QWidget):
         self.chacha_check = QCheckBox("ChaCha20")
         chacha_layout.addWidget(self.chacha_check)
         
-        chacha_layout.addWidget(QLabel("Mode:"))
-        self.chacha_mode_combo = QComboBox()
-        self.chacha_mode_combo.addItems(["ChaCha20", "ChaCha20-Poly1305"])
-        self.chacha_mode_combo.setCurrentText("ChaCha20-Poly1305")  # Default to ChaCha20-Poly1305
-        chacha_layout.addWidget(self.chacha_mode_combo)
-        
         chacha_layout.addStretch()
         methods_layout.addLayout(chacha_layout)
         
@@ -319,7 +313,6 @@ class ConfigurationTab(QWidget):
         self.ecc_check.toggled.connect(lambda checked: self.ecc_curve_combo.setEnabled(checked))
         self.twofish_check.toggled.connect(lambda checked: self.twofish_key_size_combo.setEnabled(checked))
         self.twofish_check.toggled.connect(lambda checked: self.twofish_mode_combo.setEnabled(checked))
-        self.chacha_check.toggled.connect(lambda checked: self.chacha_mode_combo.setEnabled(checked))
         
         # Connect implementation options checkboxes to validation method
         self.use_stdlib_check.toggled.connect(self._validate_implementation_options)
@@ -335,7 +328,6 @@ class ConfigurationTab(QWidget):
         self.ecc_curve_combo.setEnabled(self.ecc_check.isChecked())
         self.twofish_key_size_combo.setEnabled(self.twofish_check.isChecked())
         self.twofish_mode_combo.setEnabled(self.twofish_check.isChecked())
-        self.chacha_mode_combo.setEnabled(self.chacha_check.isChecked())
         self._update_chunk_size_visibility(self.processing_strategy_combo.currentText())
     
     def _update_chunk_size_visibility(self, strategy):
@@ -372,8 +364,7 @@ class ConfigurationTab(QWidget):
                     "mode": self.aes_mode_combo.currentText()
                 },
                 "chacha20": {
-                    "enabled": self.chacha_check.isChecked(),
-                    "use_poly1305": self.chacha_mode_combo.currentText() == "ChaCha20-Poly1305"
+                    "enabled": self.chacha_check.isChecked()
                 },
                 "rsa": {
                     "enabled": self.rsa_check.isChecked(),
@@ -445,8 +436,8 @@ class ConfigurationTab(QWidget):
                 self.aes_key_size_combo.setCurrentText(config["encryption_methods"]["aes"]["key_size"])
                 self.aes_mode_combo.setCurrentText(config["encryption_methods"]["aes"]["mode"])
                 
+                # Handle chacha20 config (and handle old configs with use_poly1305 field)
                 self.chacha_check.setChecked(config["encryption_methods"]["chacha20"]["enabled"])
-                self.chacha_mode_combo.setCurrentText(config["encryption_methods"]["chacha20"]["use_poly1305"] and "ChaCha20-Poly1305" or "ChaCha20")
                 
                 self.rsa_check.setChecked(config["encryption_methods"]["rsa"]["enabled"])
                 self.rsa_key_size_combo.setCurrentText(config["encryption_methods"]["rsa"]["key_size"])
@@ -636,8 +627,7 @@ class ConfigurationTab(QWidget):
                     "mode": self.aes_mode_combo.currentText()
                 },
                 "chacha20": {
-                    "enabled": self.chacha_check.isChecked(),
-                    "use_poly1305": self.chacha_mode_combo.currentText() == "ChaCha20-Poly1305"
+                    "enabled": self.chacha_check.isChecked()
                 },
                 "rsa": {
                     "enabled": self.rsa_check.isChecked(),

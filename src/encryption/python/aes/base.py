@@ -4,8 +4,7 @@ CryptoBench Pro - AES Base Implementation
 Provides the base class for AES implementations and common utilities.
 """
 
-import os
-import hashlib
+from .key_utils import generate_key, generate_custom_key
 
 # Maximum input size for AES (increased for better memory efficiency)
 MAX_INPUT_SIZE = 16 * 1024 * 1024  # 16MB chunks for processing larger data
@@ -22,30 +21,16 @@ class AESImplementationBase:
         self.key = None
         self.iv = None
         self.tag = None
-    
-    def _format_key_size(self, size_bits):
-        """Convert key size in bits to bytes."""
-        return size_bits // 8
+        self.use_kdf = kwargs.get('use_kdf', False)
+        self.is_custom = kwargs.get('is_custom', False)
     
     def generate_key(self):
         """Generate a random key of the specified size."""
-        key_bytes = self._format_key_size(self.key_size)
-        
-        # Validate key size
-        if key_bytes not in (16, 24, 32):  # 128, 192, or 256 bits
-            raise ValueError(f"Invalid key size: {self.key_size} bits. Must be 128, 192, or 256 bits.")
-        
-        # Generate a high-quality random key
-        self.key = os.urandom(key_bytes)
-        
-        # Key derivation (optional, for benchmarking purpose)
-        # In a real implementation, you might want to use a secure KDF
-        # This simple demonstration uses a single-pass hash
-        if hasattr(self, 'use_kdf') and self.use_kdf:
-            salt = os.urandom(16)
-            key_material = hashlib.pbkdf2_hmac('sha256', self.key, salt, 10000, dklen=key_bytes)
-            self.key = key_material
-            
+        # Delegate key generation to the appropriate utility function
+        if self.is_custom:
+            self.key = generate_custom_key(self.key_size, self.use_kdf)
+        else:
+            self.key = generate_key(self.key_size, self.use_kdf)
         return self.key
     
     def encrypt(self, data, key):
