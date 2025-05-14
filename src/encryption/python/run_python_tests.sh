@@ -36,11 +36,11 @@ fi
 
 # Check registered implementations - create more descriptive display
 $PYTHON_CMD -c "
-from src.encryption.python.python_core import _register_implementations, ENCRYPTION_IMPLEMENTATIONS
-_register_implementations()
+from src.encryption.python.core.registry import register_all_implementations
+implementations = register_all_implementations()
 print('\\nRegistered encryption implementations:')
 print('--------------------------------------')
-for name in sorted(ENCRYPTION_IMPLEMENTATIONS.keys()):
+for name in sorted(implementations.keys()):
     print(f'- {name}')
 print('--------------------------------------\\n')
 "

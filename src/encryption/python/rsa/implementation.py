@@ -45,12 +45,17 @@ class RSAImplementation(RSAImplementationBase):
             data: Data to encrypt
             public_key: Public key to use. If None, use the instance's public key.
                         Can also be a tuple (public_key, private_key) returned by generate_key.
-            
+                        
         Returns:
             bytes: Encrypted data
         """
         if public_key is None:
             public_key = self.public_key
+        elif hasattr(public_key, '__rotating_keys__'):
+            # This is a RotatingKeySet - get the next key
+            key_pair = public_key.get_next_key()
+            # If a key pair tuple is passed, use the first element (public key)
+            public_key = key_pair[0]
         elif isinstance(public_key, tuple):
             # If a key pair tuple is passed, use the first element (public key)
             public_key = public_key[0]
@@ -71,12 +76,17 @@ class RSAImplementation(RSAImplementationBase):
             ciphertext: Data to decrypt
             private_key: Private key to use. If None, use the instance's private key.
                          Can also be a tuple (public_key, private_key) returned by generate_key.
-            
+                         
         Returns:
             bytes: Decrypted data
         """
         if private_key is None:
             private_key = self.private_key
+        elif hasattr(private_key, '__rotating_keys__'):
+            # This is a RotatingKeySet - get the next key
+            key_pair = private_key.get_next_key()
+            # If a key pair tuple is passed, use the second element (private key)
+            private_key = key_pair[1]
         elif isinstance(private_key, tuple):
             # If a key pair tuple is passed, use the second element (private key)
             private_key = private_key[1]

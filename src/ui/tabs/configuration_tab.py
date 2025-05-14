@@ -206,7 +206,7 @@ class ConfigurationTab(QWidget):
         
         ecc_layout.addWidget(QLabel("Curve:"))
         self.ecc_curve_combo = QComboBox()
-        self.ecc_curve_combo.addItems(["P-256", "P-384", "P-521", "Curve25519"])
+        self.ecc_curve_combo.addItems(["P-256", "P-384", "P-521"])
         ecc_layout.addWidget(self.ecc_curve_combo)
         ecc_layout.addStretch()
         methods_layout.addLayout(ecc_layout)
