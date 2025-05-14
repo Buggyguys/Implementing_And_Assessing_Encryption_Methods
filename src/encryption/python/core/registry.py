@@ -81,6 +81,39 @@ def register_all_implementations():
         logger.warning(f"Error registering AES implementations: {str(e)}")
 
     try:
+        # Import Camellia implementations
+        from src.encryption.python.camellia.implementation import (
+            CAMELLIA_IMPLEMENTATIONS,
+            CamelliaImplementation,
+            create_custom_camellia_implementation,
+            create_stdlib_camellia_implementation,
+            register_all_camellia_variants
+        )
+        
+        # Make sure all variants are registered
+        register_all_camellia_variants()
+        
+        # Register Camellia implementation directly
+        ENCRYPTION_IMPLEMENTATIONS["camellia"] = CamelliaImplementation
+        
+        # Register custom Camellia implementation
+        ENCRYPTION_IMPLEMENTATIONS["camellia_custom"] = lambda **kwargs: create_custom_camellia_implementation(
+            key_size=int(kwargs.get("key_size", 256)),
+            mode=kwargs.get("mode", "GCM")
+        )
+        
+        # Register all Camellia variants
+        for name, impl in CAMELLIA_IMPLEMENTATIONS.items():
+            if name not in ["camellia", "camellia_custom"]:  # We already registered these implementations
+                ENCRYPTION_IMPLEMENTATIONS[name] = impl
+                
+        logger.info(f"Registered Camellia implementations: {', '.join(CAMELLIA_IMPLEMENTATIONS.keys())}")
+    except ImportError as e:
+        logger.warning(f"Could not import Camellia implementations: {str(e)}")
+    except Exception as e:
+        logger.warning(f"Error registering Camellia implementations: {str(e)}")
+
+    try:
         # Import ChaCha20 implementations
         from src.encryption.python.chacha.implementation import (
             CHACHA_IMPLEMENTATIONS,

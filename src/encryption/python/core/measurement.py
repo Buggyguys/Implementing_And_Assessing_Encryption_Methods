@@ -46,6 +46,12 @@ def measure_encryption_metrics(metrics, process_func, implementation, data, key,
     # Measure wall time
     start_time = time.perf_counter()
     
+    # Handle memory-mapped datasets by converting to bytes
+    if is_memory_mapped and hasattr(data, 'read_all'):
+        actual_data = data.read_all()
+    else:
+        actual_data = data
+    
     # Process based on the type of function and data
     try:
         # Check if we're working with a rotating key set 
@@ -58,10 +64,10 @@ def measure_encryption_metrics(metrics, process_func, implementation, data, key,
                 logger.debug(f"Using rotating key set for RSA {process_func.__name__} (chunk {chunk_index})")
             
             # Execute with the rotated key
-            result = process_func(data, actual_key)
+            result = process_func(actual_data, actual_key)
         else:
             # Regular key processing
-            result = process_func(data, key)
+            result = process_func(actual_data, key)
     except Exception as e:
         logger.error(f"Error in {process_func.__name__}: {str(e)}")
         result = b'' if process_func.__name__ == 'encrypt' else None
@@ -127,6 +133,11 @@ def measure_encryption_metrics(metrics, process_func, implementation, data, key,
         except (psutil.AccessDenied, AttributeError, OSError):
             pass
     
+    # If using memory mapping, clean up temporary data to free memory
+    if is_memory_mapped and 'actual_data' in locals():
+        del actual_data
+        gc.collect()
+        
     return result
 
 def measure_chunked_encryption(metrics, process_func, implementation, chunks, key, chunk_size=1024*1024):

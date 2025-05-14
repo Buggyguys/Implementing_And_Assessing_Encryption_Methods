@@ -211,24 +211,24 @@ class ConfigurationTab(QWidget):
         ecc_layout.addStretch()
         methods_layout.addLayout(ecc_layout)
         
-        # Twofish (replacing ML-KEM)
-        twofish_layout = QHBoxLayout()
-        self.twofish_check = QCheckBox("Twofish")
-        twofish_layout.addWidget(self.twofish_check)
+        # Camellia (replacing Twofish)
+        camellia_layout = QHBoxLayout()
+        self.camellia_check = QCheckBox("Camellia")
+        camellia_layout.addWidget(self.camellia_check)
         
-        twofish_layout.addWidget(QLabel("Key Size:"))
-        self.twofish_key_size_combo = QComboBox()
-        self.twofish_key_size_combo.addItems(["128", "192", "256"])
-        twofish_layout.addWidget(self.twofish_key_size_combo)
+        camellia_layout.addWidget(QLabel("Key Size:"))
+        self.camellia_key_size_combo = QComboBox()
+        self.camellia_key_size_combo.addItems(["128", "192", "256"])
+        camellia_layout.addWidget(self.camellia_key_size_combo)
         
-        twofish_layout.addWidget(QLabel("Mode:"))
-        self.twofish_mode_combo = QComboBox()
-        self.twofish_mode_combo.addItems(["CBC", "CTR", "GCM", "ECB"])
-        self.twofish_mode_combo.setCurrentText("GCM")  # GCM is recommended default
-        twofish_layout.addWidget(self.twofish_mode_combo)
+        camellia_layout.addWidget(QLabel("Mode:"))
+        self.camellia_mode_combo = QComboBox()
+        self.camellia_mode_combo.addItems(["CBC", "CTR", "GCM", "ECB"])
+        self.camellia_mode_combo.setCurrentText("GCM")  # GCM is recommended default
+        camellia_layout.addWidget(self.camellia_mode_combo)
         
-        twofish_layout.addStretch()
-        methods_layout.addLayout(twofish_layout)
+        camellia_layout.addStretch()
+        methods_layout.addLayout(camellia_layout)
         
         # Set layout for methods group
         methods_group.setLayout(methods_layout)
@@ -336,8 +336,8 @@ class ConfigurationTab(QWidget):
         self.rsa_check.toggled.connect(self._update_rsa_controls)
         self.rsa_reuse_keys_check.toggled.connect(self._update_rsa_controls)
         self.ecc_check.toggled.connect(lambda checked: self.ecc_curve_combo.setEnabled(checked))
-        self.twofish_check.toggled.connect(lambda checked: self.twofish_key_size_combo.setEnabled(checked))
-        self.twofish_check.toggled.connect(lambda checked: self.twofish_mode_combo.setEnabled(checked))
+        self.camellia_check.toggled.connect(lambda checked: self.camellia_key_size_combo.setEnabled(checked))
+        self.camellia_check.toggled.connect(lambda checked: self.camellia_mode_combo.setEnabled(checked))
         
         # Connect implementation options checkboxes to validation method
         self.use_stdlib_check.toggled.connect(self._validate_implementation_options)
@@ -354,8 +354,8 @@ class ConfigurationTab(QWidget):
         self.rsa_reuse_keys_check.setEnabled(self.rsa_check.isChecked())
         self._update_rsa_controls()
         self.ecc_curve_combo.setEnabled(self.ecc_check.isChecked())
-        self.twofish_key_size_combo.setEnabled(self.twofish_check.isChecked())
-        self.twofish_mode_combo.setEnabled(self.twofish_check.isChecked())
+        self.camellia_key_size_combo.setEnabled(self.camellia_check.isChecked())
+        self.camellia_mode_combo.setEnabled(self.camellia_check.isChecked())
         self._update_chunk_size_visibility(self.processing_strategy_combo.currentText())
     
     def _update_rsa_controls(self):
@@ -412,10 +412,10 @@ class ConfigurationTab(QWidget):
                     "enabled": self.ecc_check.isChecked(),
                     "curve": self.ecc_curve_combo.currentText()
                 },
-                "twofish": {
-                    "enabled": self.twofish_check.isChecked(),
-                    "key_size": self.twofish_key_size_combo.currentText(),
-                    "mode": self.twofish_mode_combo.currentText()
+                "camellia": {
+                    "enabled": self.camellia_check.isChecked(),
+                    "key_size": self.camellia_key_size_combo.currentText(),
+                    "mode": self.camellia_mode_combo.currentText()
                 }
             },
             "test_parameters": {
@@ -500,9 +500,9 @@ class ConfigurationTab(QWidget):
                 self.ecc_check.setChecked(config["encryption_methods"]["ecc"]["enabled"])
                 self.ecc_curve_combo.setCurrentText(config["encryption_methods"]["ecc"]["curve"])
                 
-                self.twofish_check.setChecked(config["encryption_methods"]["twofish"]["enabled"])
-                self.twofish_key_size_combo.setCurrentText(config["encryption_methods"]["twofish"]["key_size"])
-                self.twofish_mode_combo.setCurrentText(config["encryption_methods"]["twofish"]["mode"])
+                self.camellia_check.setChecked(config["encryption_methods"]["camellia"]["enabled"])
+                self.camellia_key_size_combo.setCurrentText(config["encryption_methods"]["camellia"]["key_size"])
+                self.camellia_mode_combo.setCurrentText(config["encryption_methods"]["camellia"]["mode"])
                 
                 # Test parameters
                 self.processing_strategy_combo.setCurrentText(config["test_parameters"]["processing_strategy"])
@@ -576,7 +576,7 @@ class ConfigurationTab(QWidget):
             self.chacha_check.isChecked(),
             self.rsa_check.isChecked(),
             self.ecc_check.isChecked(),
-            self.twofish_check.isChecked()
+            self.camellia_check.isChecked()
         ]):
             QMessageBox.warning(self, "Warning", "Please select at least one encryption method.")
             return
@@ -695,10 +695,10 @@ class ConfigurationTab(QWidget):
                     "enabled": self.ecc_check.isChecked(),
                     "curve": self.ecc_curve_combo.currentText()
                 },
-                "twofish": {
-                    "enabled": self.twofish_check.isChecked(),
-                    "key_size": self.twofish_key_size_combo.currentText(),
-                    "mode": self.twofish_mode_combo.currentText()
+                "camellia": {
+                    "enabled": self.camellia_check.isChecked(),
+                    "key_size": self.camellia_key_size_combo.currentText(),
+                    "mode": self.camellia_mode_combo.currentText()
                 }
             },
             "test_parameters": {
@@ -1026,9 +1026,9 @@ class ConfigurationTab(QWidget):
                 "ecc": {
                     "curve": self.ecc_curve_combo.currentText()
                 },
-                "twofish": {
-                    "key_size": self.twofish_key_size_combo.currentText(),
-                    "mode": self.twofish_mode_combo.currentText()
+                "camellia": {
+                    "key_size": self.camellia_key_size_combo.currentText(),
+                    "mode": self.camellia_mode_combo.currentText()
                 }
             }
         }

@@ -46,6 +46,20 @@ class MemoryMappedDataset:
         """Read the entire file."""
         return self.read(0, self.file_size)
     
+    def __getitem__(self, key):
+        """Support for subscript access - dataset[x] or dataset[start:end]."""
+        if isinstance(key, slice):
+            start = 0 if key.start is None else key.start
+            stop = self.file_size if key.stop is None else key.stop
+            size = stop - start
+            return self.read(start, size)
+        elif isinstance(key, int):
+            if key < 0:  # Handle negative indices
+                key = self.file_size + key
+            return self.read(key, 1)
+        else:
+            raise TypeError(f"Invalid index type: {type(key)}")
+    
     def close(self):
         """Close the memory map and file."""
         if self._closed:

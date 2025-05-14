@@ -1,8 +1,41 @@
 #!/usr/bin/env python3
 """
 CryptoBench Pro - Python Encryption Implementations
-Provides implementations of various encryption algorithms in Python.
+Implements encryption methods in Python.
 """
+
+# Import core modules
+from src.encryption.python.core.registry import register_all_implementations, list_implementations, get_implementation
+
+# Import AES implementations
+from src.encryption.python.aes.implementation import AESImplementation, create_custom_aes_implementation
+
+# Import ChaCha20 implementations
+from src.encryption.python.chacha.implementation import ChaCha20Implementation
+
+# Import RSA implementations
+from src.encryption.python.rsa.implementation import RSAImplementation, create_custom_rsa_implementation
+
+# Import ECC implementations
+from src.encryption.python.ecc.implementation import ECCImplementation, create_custom_ecc_implementation
+
+# Import Camellia implementations
+from src.encryption.python.camellia.implementation import CamelliaImplementation, create_custom_camellia_implementation
+
+__all__ = [
+    'register_all_implementations',
+    'list_implementations',
+    'get_implementation',
+    'AESImplementation',
+    'create_custom_aes_implementation',
+    'ChaCha20Implementation',
+    'RSAImplementation',
+    'create_custom_rsa_implementation',
+    'ECCImplementation',
+    'create_custom_ecc_implementation',
+    'CamelliaImplementation',
+    'create_custom_camellia_implementation'
+]
 
 # We'll let python_core import and register the implementations
 # to avoid circular imports

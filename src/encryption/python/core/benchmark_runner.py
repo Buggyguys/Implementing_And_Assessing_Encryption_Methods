@@ -85,7 +85,7 @@ def run_benchmarks(config, implementations):
         logger.info("Memory tracking not available (tracemalloc not installed)")
     
     # Set a flag to use memory mapping for really large files
-    use_mmap = processing_strategy == "Memory" and os.path.exists(dataset_path) and os.path.getsize(dataset_path) > 1024 * 1024 * 1024  # > 1GB
+    use_mmap = False  # Disable memory mapping completely to use full in-memory loading
     
     # Load dataset based on processing strategy
     if processing_strategy == "Memory":
@@ -147,6 +147,40 @@ def run_benchmarks(config, implementations):
                     custom_settings = method_settings.copy()
                     custom_settings["is_custom"] = True
                     enabled_methods.append(("chacha20_custom", custom_settings))
+            elif method_name == "camellia":
+                # Camellia implementations
+                key_size = method_settings.get("key_size", "256")
+                mode = method_settings.get("mode", "GCM").upper()
+                
+                if use_stdlib:
+                    # Special case: Skip Camellia-GCM for standard library mode
+                    if mode == "GCM":
+                        logger.warning(f"Skipping Camellia-GCM in standard library mode - not supported")
+                    else:
+                        std_settings = method_settings.copy()
+                        std_settings["is_custom"] = False
+                        
+                        # Use specialized implementation names for different key sizes and modes
+                        if mode in ["CBC", "CTR", "ECB"]:
+                            impl_name = f"camellia{key_size}_{mode.lower()}"
+                            if impl_name in implementations:
+                                enabled_methods.append((impl_name, std_settings))
+                            else:
+                                # Fallback to generic Camellia implementation
+                                enabled_methods.append((method_name, std_settings))
+                
+                if use_custom:
+                    custom_settings = method_settings.copy()
+                    custom_settings["is_custom"] = True
+                    
+                    # Use specialized custom implementation names for different key sizes and modes
+                    if mode in ["CBC", "CTR", "GCM", "ECB"]:
+                        custom_impl_name = f"camellia{key_size}_{mode.lower()}_custom"
+                        if custom_impl_name in implementations:
+                            enabled_methods.append((custom_impl_name, custom_settings))
+                        else:
+                            # Fallback to generic custom Camellia implementation
+                            enabled_methods.append(("camellia_custom", custom_settings))
             elif method_name == "rsa":
                 # RSA implementations
                 reuse_keys = method_settings.get("reuse_keys", False)
