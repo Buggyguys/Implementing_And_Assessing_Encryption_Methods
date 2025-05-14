@@ -135,7 +135,13 @@ def run_language_benchmark(language, config):
                 session_json_path = os.path.join(session_dir, "test_config.json")
                 subprocess.run(f"{interpreter} {lang_script_path} {session_json_path}", shell=True, check=True)
         
-        logger.info(f"{language.capitalize()} benchmarks completed successfully")
+        # For C language, clean up placeholder implementations
+        if language == "c":
+            clean_script_path = os.path.join(script_dir, "encryption", language, "clean_placeholders.sh")
+            if os.path.exists(clean_script_path):
+                os.chmod(clean_script_path, 0o755)  # Make executable
+                subprocess.run([clean_script_path], check=True)
+        
         return True
     
     except subprocess.CalledProcessError as e:

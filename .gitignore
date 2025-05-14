@@ -13,6 +13,7 @@ src/encryption/python/rsa/__pycache__/
 src/encryption/python/core/__pycache__/
 src/encryption/python/ecc/__pycache__/
 src/encryption/python/camellia/__pycache__/
+src/encryption/c/build/
 
 
 

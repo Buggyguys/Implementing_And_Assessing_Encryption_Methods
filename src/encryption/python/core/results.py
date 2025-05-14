@@ -42,6 +42,8 @@ def calculate_aggregated_metrics(iterations_data, dataset_size_bytes):
     keygen_cpu_user_times = [data.get("keygen_cpu_user_time_s", 0) for data in iterations_data]
     keygen_cpu_system_times = [data.get("keygen_cpu_system_time_s", 0) for data in iterations_data]
     keygen_peak_rss = [data.get("keygen_peak_rss_bytes", 0) for data in iterations_data]
+    key_sizes = [data.get("key_size_bytes", 0) for data in iterations_data]
+    num_keys = [data.get("num_keys", 1) for data in iterations_data]  # Default to 1 if not specified
     
     encrypt_wall_times = [data.get("encrypt_wall_time_ms", 0) for data in iterations_data]
     encrypt_cpu_user_times = [data.get("encrypt_cpu_user_time_s", 0) for data in iterations_data]
@@ -65,6 +67,8 @@ def calculate_aggregated_metrics(iterations_data, dataset_size_bytes):
     avg_keygen_cpu_system_time_s = safe_avg(keygen_cpu_system_times)
     avg_keygen_cpu_total_time_s = avg_keygen_cpu_user_time_s + avg_keygen_cpu_system_time_s
     avg_keygen_peak_rss_mb = safe_avg([rss / (1024 * 1024) for rss in keygen_peak_rss if rss > 0])
+    avg_key_size_bytes = safe_avg(key_sizes)
+    avg_num_keys = safe_avg(num_keys)
     
     avg_encrypt_wall_time_ms = safe_avg(encrypt_wall_times)
     avg_encrypt_cpu_user_time_s = safe_avg(encrypt_cpu_user_times)
@@ -116,6 +120,25 @@ def calculate_aggregated_metrics(iterations_data, dataset_size_bytes):
     encryption_time_seconds = avg_encrypt_wall_time_ms / 1000.0
     decryption_time_seconds = avg_decrypt_wall_time_ms / 1000.0
     
+    # Calculate bits per second throughput (C-specific metric)
+    avg_encrypt_throughput_bps = 0
+    if avg_encrypt_wall_time_ms > 0:
+        avg_encrypt_throughput_bps = (dataset_size_bytes * 8) / (avg_encrypt_wall_time_ms / 1000.0)
+    
+    avg_decrypt_throughput_bps = 0
+    if avg_decrypt_wall_time_ms > 0:
+        avg_decrypt_throughput_bps = (dataset_size_bytes * 8) / (avg_decrypt_wall_time_ms / 1000.0)
+    
+    # Count correctness failures (for C compatibility)
+    correctness_failures = 0
+    
+    # Calculate total metrics across all iterations
+    total_keygen_time_ms = sum(keygen_wall_times)
+    total_encrypt_time_ms = sum(encrypt_wall_times)
+    total_decrypt_time_ms = sum(decrypt_wall_times)
+    total_num_keys = sum(num_keys)
+    total_key_size_bytes = sum(key_sizes)
+    
     # Construct and return the aggregated metrics dictionary
     return {
         "iterations_completed": iterations_completed,
@@ -123,6 +146,8 @@ def calculate_aggregated_metrics(iterations_data, dataset_size_bytes):
         "avg_keygen_wall_time_ms": avg_keygen_wall_time_ms,
         "avg_keygen_cpu_total_time_s": avg_keygen_cpu_total_time_s,
         "avg_keygen_peak_rss_mb": avg_keygen_peak_rss_mb,
+        "avg_key_size_bytes": avg_key_size_bytes,
+        "avg_num_keys": avg_num_keys,
         "avg_encrypt_wall_time_ms": avg_encrypt_wall_time_ms,
         "avg_encrypt_cpu_total_time_s": avg_encrypt_cpu_total_time_s,
         "avg_encrypt_cpu_percentage": avg_encrypt_cpu_percentage,
@@ -138,7 +163,16 @@ def calculate_aggregated_metrics(iterations_data, dataset_size_bytes):
         "avg_throughput_encrypt_mb_per_s": avg_throughput_encrypt_mb_per_s,
         "avg_throughput_decrypt_mb_per_s": avg_throughput_decrypt_mb_per_s,
         "encryption_time_seconds": encryption_time_seconds,
-        "decryption_time_seconds": decryption_time_seconds
+        "decryption_time_seconds": decryption_time_seconds,
+        "avg_encrypt_throughput_bps": avg_encrypt_throughput_bps,
+        "avg_decrypt_throughput_bps": avg_decrypt_throughput_bps,
+        "correctness_failures": correctness_failures,
+        # New total metrics
+        "total_keygen_time_ms": total_keygen_time_ms,
+        "total_encrypt_time_ms": total_encrypt_time_ms,
+        "total_decrypt_time_ms": total_decrypt_time_ms,
+        "total_num_keys": total_num_keys,
+        "total_key_size_bytes": total_key_size_bytes
     }
 
 def save_results(results, session_dir):

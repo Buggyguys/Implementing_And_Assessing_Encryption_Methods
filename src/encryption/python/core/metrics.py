@@ -42,6 +42,8 @@ class BenchmarkMetrics:
         self.keygen_peak_rss_bytes = 0
         self.keygen_ctx_switches_voluntary = 0
         self.keygen_ctx_switches_involuntary = 0
+        self.key_size_bytes = 0
+        self.num_keys = 1  # Default to 1 key per iteration
         
         # Encryption metrics  
         self.encrypt_wall_time_ms = 0
@@ -123,6 +125,21 @@ class BenchmarkMetrics:
             self.keygen_peak_rss_bytes = self.process.memory_info().rss
         except (psutil.AccessDenied, AttributeError, OSError):
             logger.warning("Memory metrics are not available - memory usage will not be collected")
+        
+        # Record key size if possible
+        try:
+            if hasattr(key, '__len__'):
+                self.key_size_bytes = len(key)
+            elif isinstance(key, tuple) and len(key) == 2:  # For RSA key pairs (public, private)
+                # For RSA keys, measure the sum of both keys
+                self.key_size_bytes = len(str(key[0])) + len(str(key[1]))
+                # For RSA we consider this as two keys (public and private)
+                self.num_keys = 2
+            else:
+                self.key_size_bytes = len(str(key))
+        except (TypeError, AttributeError):
+            self.key_size_bytes = 0
+            logger.warning("Could not determine key size")
         
         return key
     
@@ -245,6 +262,8 @@ class BenchmarkMetrics:
             "keygen_cpu_user_time_s": self.keygen_cpu_user_time_s,
             "keygen_cpu_system_time_s": self.keygen_cpu_system_time_s,
             "keygen_peak_rss_bytes": self.keygen_peak_rss_bytes,
+            "key_size_bytes": self.key_size_bytes,
+            "num_keys": self.num_keys,
             
             # Encryption metrics
             "encrypt_wall_time_ms": self.encrypt_wall_time_ms,

@@ -763,9 +763,38 @@ class ConfigurationTab(QWidget):
                 print(f"ERROR: {error_msg}")
                 QMessageBox.warning(self, "Test Error", error_msg)
         
+        # If C is selected, run C tests directly
+        if self.lang_c_check.isChecked():
+            try:
+                # Get the path to the C test script
+                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                c_test_script = os.path.join(script_dir, "encryption", "c", "run_c_tests.sh")
+                
+                # Make sure the script is executable
+                os.chmod(c_test_script, 0o755)
+                
+                # Run the C test script
+                message = "Running C encryption tests..."
+                self.status_message.emit(message)
+                
+                subprocess.run([c_test_script, config_path], check=True)
+                
+                # Update progress
+                message = "C tests completed successfully"
+                self.status_message.emit(message)
+            except subprocess.CalledProcessError as e:
+                error_msg = f"C tests failed: {str(e)}"
+                self.status_message.emit(error_msg)
+                print(f"ERROR: {error_msg}")
+                QMessageBox.warning(self, "Test Error", error_msg)
+            except Exception as e:
+                error_msg = f"Error running C tests: {str(e)}"
+                self.status_message.emit(error_msg)
+                print(f"ERROR: {error_msg}")
+                QMessageBox.warning(self, "Test Error", error_msg)
+        
         # For other languages, run the orchestrator
         if any([
-            self.lang_c_check.isChecked(),
             self.lang_rust_check.isChecked(),
             self.lang_go_check.isChecked(),
             self.lang_assembly_check.isChecked()
