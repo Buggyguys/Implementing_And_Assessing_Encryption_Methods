@@ -33,6 +33,10 @@ typedef struct {
     unsigned char* (*generate_key)(void*, int*);
     unsigned char* (*encrypt)(void*, const unsigned char*, int, const unsigned char*, int*);
     unsigned char* (*decrypt)(void*, const unsigned char*, int, const unsigned char*, int*);
+    
+    // Stream processing functions
+    unsigned char* (*encrypt_stream)(void*, const unsigned char*, int, const unsigned char*, int, int*);
+    unsigned char* (*decrypt_stream)(void*, const unsigned char*, int, const unsigned char*, int, int*);
 } implementation_info_t;
 
 // Implementation registry structure

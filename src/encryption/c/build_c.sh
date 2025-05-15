@@ -34,6 +34,16 @@ if [ $CLEAN_BUILD -eq 1 ]; then
         if [ -f "${impl_dir}/implementation.c" ] && grep -q "// Placeholder implementation" "${impl_dir}/implementation.c"; then
             echo "Removing placeholder ${impl_dir} implementation..."
             rm -f "${impl_dir}/implementation.c"
+            
+            # For Camellia, also remove the component files if they were created as placeholders
+            if [ "$impl_dir" = "camellia" ]; then
+                for component in camellia_common camellia_key camellia_gcm camellia_cbc camellia_ctr camellia_ecb; do
+                    if [ -f "${impl_dir}/${component}.c" ] && grep -q "// Placeholder implementation" "${impl_dir}/${component}.c"; then
+                        echo "Removing placeholder ${impl_dir}/${component}.c..."
+                        rm -f "${impl_dir}/${component}.c"
+                    fi
+                done
+            fi
         fi
     done
 fi
@@ -79,13 +89,13 @@ echo "Compiling implementation files..."
 # AES implementation
 echo "Compiling AES..."
 # Compile individual AES mode files
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/aes_gcm.o aes/aes_gcm.c
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/aes_cbc.o aes/aes_cbc.c
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/aes_ctr.o aes/aes_ctr.c
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/aes_ecb.o aes/aes_ecb.c
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/aes_key.o aes/aes_key.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_gcm.o aes/aes_gcm.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_cbc.o aes/aes_cbc.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_ctr.o aes/aes_ctr.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_ecb.o aes/aes_ecb.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_key.o aes/aes_key.c
 # Compile main AES implementation
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/aes_implementation.o aes/implementation.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_implementation.o aes/implementation.c
 
 # Camellia implementation
 echo "Compiling Camellia..."
@@ -95,8 +105,17 @@ if ! check_implementation "camellia/implementation.c"; then
     echo "// Placeholder implementation" > camellia/implementation.c
     echo "#include \"implementation.h\"" >> camellia/implementation.c
     echo "void register_camellia_implementations(implementation_registry_t* registry) {}" >> camellia/implementation.c
+else
+    # Compile individual Camellia mode files
+    echo "Compiling Camellia components..."
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_common.o camellia/camellia_common.c
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_key.o camellia/camellia_key.c
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_gcm.o camellia/camellia_gcm.c
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_cbc.o camellia/camellia_cbc.c
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_ctr.o camellia/camellia_ctr.c
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_ecb.o camellia/camellia_ecb.c
 fi
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/camellia_implementation.o camellia/implementation.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_implementation.o camellia/implementation.c
 
 # ChaCha20 implementation
 echo "Compiling ChaCha20..."
@@ -107,7 +126,7 @@ if ! check_implementation "chacha/implementation.c"; then
     echo "#include \"implementation.h\"" >> chacha/implementation.c
     echo "void register_chacha_implementations(implementation_registry_t* registry) {}" >> chacha/implementation.c
 fi
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/chacha_implementation.o chacha/implementation.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/chacha_implementation.o chacha/implementation.c
 
 # RSA implementation
 echo "Compiling RSA..."
@@ -118,7 +137,18 @@ if ! check_implementation "rsa/implementation.c"; then
     echo "#include \"implementation.h\"" >> rsa/implementation.c
     echo "void register_rsa_implementations(implementation_registry_t* registry) {}" >> rsa/implementation.c
 fi
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/rsa_implementation.o rsa/implementation.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/rsa_implementation.o rsa/implementation.c
+
+# Check for and compile RSA helper files if they exist
+if [ -f "rsa/rsa_key.c" ]; then
+    echo "Compiling RSA key management..."
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/rsa_key.o rsa/rsa_key.c
+fi
+
+if [ -f "rsa/rsa_common.c" ]; then
+    echo "Compiling RSA common functions..."
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/rsa_common.o rsa/rsa_common.c
+fi
 
 # ECC implementation
 echo "Compiling ECC..."
@@ -129,13 +159,36 @@ if ! check_implementation "ecc/implementation.c"; then
     echo "#include \"implementation.h\"" >> ecc/implementation.c
     echo "void register_ecc_implementations(implementation_registry_t* registry) {}" >> ecc/implementation.c
 fi
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -c -o build/ecc_implementation.o ecc/implementation.c
+gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/ecc_implementation.o ecc/implementation.c
+
+# Check for and compile ECC helper files if they exist
+if [ -f "ecc/ecc_common.c" ]; then
+    echo "Compiling ECC common functions..."
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/ecc_common.o ecc/ecc_common.c
+fi
+
+if [ -f "ecc/ecc_key.c" ]; then
+    echo "Compiling ECC key management..."
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/ecc_key.o ecc/ecc_key.c
+fi
+
+if [ -f "ecc/encryption_ecc.c" ]; then
+    echo "Compiling ECC encryption functions..."
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/encryption_ecc.o ecc/encryption_ecc.c
+fi
+
+if [ -f "ecc/decryption_ecc.c" ]; then
+    echo "Compiling ECC decryption functions..."
+    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/decryption_ecc.o ecc/decryption_ecc.c
+fi
 
 # Compile the core with all implementations
 echo "Compiling C core..."
 gcc -Wall -O2 \
     -I"${JSON_C_INCLUDE}" \
     -I"${SCRIPT_DIR}" \
+    -DOPENSSL_API_COMPAT=0x10100000L \
+    -Wno-deprecated-declarations \
     -L"${JSON_C_LIB}" \
     -o c_core \
     c_core.c \
@@ -146,10 +199,22 @@ gcc -Wall -O2 \
     build/aes_ecb.o \
     build/aes_key.o \
     build/camellia_implementation.o \
+    $([ -f build/camellia_common.o ] && echo "build/camellia_common.o") \
+    $([ -f build/camellia_key.o ] && echo "build/camellia_key.o") \
+    $([ -f build/camellia_gcm.o ] && echo "build/camellia_gcm.o") \
+    $([ -f build/camellia_cbc.o ] && echo "build/camellia_cbc.o") \
+    $([ -f build/camellia_ctr.o ] && echo "build/camellia_ctr.o") \
+    $([ -f build/camellia_ecb.o ] && echo "build/camellia_ecb.o") \
     build/chacha_implementation.o \
     build/rsa_implementation.o \
+    $([ -f build/rsa_key.o ] && echo "build/rsa_key.o") \
+    $([ -f build/rsa_common.o ] && echo "build/rsa_common.o") \
     build/ecc_implementation.o \
-    -ljson-c -lm
+    $([ -f build/ecc_common.o ] && echo "build/ecc_common.o") \
+    $([ -f build/ecc_key.o ] && echo "build/ecc_key.o") \
+    $([ -f build/encryption_ecc.o ] && echo "build/encryption_ecc.o") \
+    $([ -f build/decryption_ecc.o ] && echo "build/decryption_ecc.o") \
+    -ljson-c -lm -lcrypto
 
 # Also copy the executable to the project build directory for use by the orchestrator
 echo "Copying executable to ${BUILD_DIR}/c_encryption_benchmark"

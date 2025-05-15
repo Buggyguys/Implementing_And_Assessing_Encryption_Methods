@@ -25,12 +25,20 @@ void register_aes_implementations(implementation_registry_t* registry) {
     char* mode_str = getenv("AES_MODE");
     char* use_stdlib_str = getenv("USE_STDLIB");
     char* use_custom_str = getenv("USE_CUSTOM");
+    char* aes_enabled_str = getenv("AES_ENABLED");
     
     // Default values if environment variables are not set
     int key_size = key_size_str ? atoi(key_size_str) : 256;  // Default to 256
     char mode[16] = "GCM";  // Default to GCM
     int use_stdlib = use_stdlib_str ? atoi(use_stdlib_str) : 1;  // Default to true
     int use_custom = use_custom_str ? atoi(use_custom_str) : 1;  // Default to true
+    int aes_enabled = aes_enabled_str ? atoi(aes_enabled_str) : 1;  // Default to enabled
+    
+    // Check if AES is enabled in the configuration
+    if (!aes_enabled) {
+        printf("AES implementations disabled in configuration\n");
+        return;
+    }
     
     if (mode_str) {
         strncpy(mode, mode_str, sizeof(mode) - 1);
@@ -48,6 +56,8 @@ void register_aes_implementations(implementation_registry_t* registry) {
         registry->implementations[index].generate_key = aes_generate_key;
         registry->implementations[index].encrypt = aes_encrypt;
         registry->implementations[index].decrypt = aes_decrypt;
+        registry->implementations[index].encrypt_stream = aes_encrypt_stream;
+        registry->implementations[index].decrypt_stream = aes_decrypt_stream;
         registry->count++;
     }
     
@@ -64,6 +74,8 @@ void register_aes_implementations(implementation_registry_t* registry) {
         registry->implementations[index].generate_key = aes_custom_generate_key;
         registry->implementations[index].encrypt = aes_custom_encrypt;
         registry->implementations[index].decrypt = aes_custom_decrypt;
+        registry->implementations[index].encrypt_stream = aes_encrypt_stream;
+        registry->implementations[index].decrypt_stream = aes_decrypt_stream;
         registry->count++;
     }
     
