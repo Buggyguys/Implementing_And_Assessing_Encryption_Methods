@@ -92,22 +92,23 @@ def run_language_benchmark(language, config):
         
         # Run the language-specific benchmark
         if language == "zig":
-            # For Zig, we can import and run directly
-            sys.path.insert(0, os.path.dirname(script_dir))
+            # For Zig, we need to build first and then run the executable
+            build_script_path = os.path.join(script_dir, "encryption", language, f"build_{language}.sh")
+            if os.path.exists(build_script_path):
+                logger.info(f"Building {language} implementation...")
+                os.chmod(build_script_path, 0o755)  # Make executable
+                subprocess.run([build_script_path], check=True)
             
-            # Check if the script exists
-            if not os.path.exists(lang_script_path):
-                logger.error(f"{language} core script not found at {lang_script_path}")
+            # Look for the compiled executable
+            executable_path = os.path.join(script_dir, "encryption", language, "build", f"{language}_core")
+            if os.path.exists(executable_path):
+                os.chmod(executable_path, 0o755)  # Make executable
+                # Pass JSON config path to the executable
+                session_json_path = os.path.join(session_dir, "test_config.json")
+                subprocess.run([executable_path, session_json_path], check=True)
+            else:
+                logger.error(f"{language} core executable not found at {executable_path}")
                 return False
-                
-            # Dynamic import and run
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(f"{language}_core", lang_script_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            
-            # Call the main function
-            module.main(config)
         elif language == "java":
             # For Java, use Java specific execution
             java_main_class = os.path.join(script_dir, "encryption", language, "JavaCore")
@@ -146,8 +147,8 @@ def run_language_benchmark(language, config):
                 session_json_path = os.path.join(session_dir, "test_config.json")
                 subprocess.run(f"{interpreter} {lang_script_path} {session_json_path}", shell=True, check=True)
         
-        # For C language, clean up placeholder implementations
-        if language == "c":
+        # For C and Zig languages, clean up placeholder implementations
+        if language in ["c", "zig"]:
             clean_script_path = os.path.join(script_dir, "encryption", language, "clean.sh")
             if os.path.exists(clean_script_path):
                 os.chmod(clean_script_path, 0o755)  # Make executable
@@ -220,8 +221,13 @@ def main():
         # Extract enabled languages
         enabled_languages = []
         for lang, settings in config["languages"].items():
-            if settings.get("is_enabled", False):
-                enabled_languages.append(lang)
+            # Handle both boolean values and objects with is_enabled field
+            if isinstance(settings, bool):
+                if settings:
+                    enabled_languages.append(lang)
+            elif isinstance(settings, dict):
+                if settings.get("is_enabled", False):
+                    enabled_languages.append(lang)
         
         if not enabled_languages:
             logger.error("No languages enabled in configuration. Aborting.")
