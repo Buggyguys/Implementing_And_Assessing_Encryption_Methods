@@ -17,3 +17,4 @@ src/encryption/c/build/
 src/encryption/c/c_core
 src/ui/tabs/configuration_tab/__pycache__/
 src/encryption/zig/.zig-cache/
+
