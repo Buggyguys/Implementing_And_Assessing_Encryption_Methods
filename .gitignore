@@ -15,5 +15,5 @@ src/encryption/python/ecc/__pycache__/
 src/encryption/python/camellia/__pycache__/
 src/encryption/c/build/
 src/encryption/c/c_core
-
+src/ui/tabs/configuration_tab/__pycache__/
 

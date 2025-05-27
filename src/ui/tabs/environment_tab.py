@@ -30,14 +30,14 @@ class EnvironmentCheckWorker(QThread):
         self.is_canceled = False
     
     def run(self):
-        """Run environment checks."""
+        """Run the environment checks."""
         try:
-            # List of checks to perform
-            total_checks = 10
-            current_check = 0
+            # Set up environment checks (total number of checks)
+            total_checks = 7  # Update when adding/removing checks
+            current_check = 1
             
-            # Check Python version
-            self._check_python_version(current_check, total_checks)
+            # Check Python
+            self._check_python(current_check, total_checks)
             if self.is_canceled:
                 return
             current_check += 1
@@ -48,52 +48,35 @@ class EnvironmentCheckWorker(QThread):
                 return
             current_check += 1
             
-            # Check Rust compiler
-            self._check_rust_compiler(current_check, total_checks)
+            # Check Rust
+            self._check_rust(current_check, total_checks)
             if self.is_canceled:
                 return
             current_check += 1
             
-            # Check Go compiler
-            self._check_go_compiler(current_check, total_checks)
+            # Check Go
+            self._check_go(current_check, total_checks)
             if self.is_canceled:
                 return
             current_check += 1
             
-            # Check Assembly tools
-            self._check_assembly_tools(current_check, total_checks)
+            # Check Java tools
+            self._check_java_tools(current_check, total_checks)
             if self.is_canceled:
                 return
             current_check += 1
             
-            # Check Python crypto libraries
-            self._check_python_crypto_libs(current_check, total_checks)
+            # Check Zig tools
+            self._check_zig_tools(current_check, total_checks)
             if self.is_canceled:
                 return
             current_check += 1
             
-            # Check C crypto libraries
-            self._check_c_crypto_libs(current_check, total_checks)
+            # Check CPU information
+            self._check_cpu_info(current_check, total_checks)
             if self.is_canceled:
                 return
             current_check += 1
-            
-            # Check system RAM
-            self._check_system_ram(current_check, total_checks)
-            if self.is_canceled:
-                return
-            current_check += 1
-            
-            # Check disk space
-            self._check_disk_space(current_check, total_checks)
-            if self.is_canceled:
-                return
-            current_check += 1
-            
-            # Check CPU capabilities
-            self._check_cpu_capabilities(current_check, total_checks)
-            if self.is_canceled:
-                return
             
             # Emit finished signal
             self.finished.emit()
@@ -106,7 +89,7 @@ class EnvironmentCheckWorker(QThread):
         """Cancel the checking process."""
         self.is_canceled = True
     
-    def _check_python_version(self, current_check, total_checks):
+    def _check_python(self, current_check, total_checks):
         """Check Python version."""
         item_name = "Python Version"
         self.progress_updated.emit(
@@ -193,7 +176,7 @@ class EnvironmentCheckWorker(QThread):
                 "No C compiler found (gcc or clang required)"
             )
     
-    def _check_rust_compiler(self, current_check, total_checks):
+    def _check_rust(self, current_check, total_checks):
         """Check Rust compiler."""
         item_name = "Rust Compiler"
         self.progress_updated.emit(
@@ -232,7 +215,7 @@ class EnvironmentCheckWorker(QThread):
                 "Rust compiler not found (optional, required for Rust implementations)"
             )
     
-    def _check_go_compiler(self, current_check, total_checks):
+    def _check_go(self, current_check, total_checks):
         """Check Go compiler."""
         item_name = "Go Compiler"
         self.progress_updated.emit(
@@ -271,23 +254,23 @@ class EnvironmentCheckWorker(QThread):
                 "Go compiler not found (optional, required for Go implementations)"
             )
     
-    def _check_assembly_tools(self, current_check, total_checks):
-        """Check Assembly tools."""
-        item_name = "Assembly Tools"
+    def _check_java_tools(self, current_check, total_checks):
+        """Check Java tools."""
+        item_name = "Java Tools"
         self.progress_updated.emit(
             int((current_check / total_checks) * 100),
             f"Checking {item_name}..."
         )
         
-        # Check for nasm or gas
-        nasm_path = shutil.which("nasm")
-        gas_path = shutil.which("as")
+        # Check for Java
+        java_path = shutil.which("java")
+        javac_path = shutil.which("javac")
         
-        if nasm_path:
+        if java_path and javac_path:
             try:
-                # Get nasm version
+                # Get Java version
                 result = subprocess.run(
-                    ["nasm", "--version"],
+                    ["java", "--version"],
                     capture_output=True,
                     text=True,
                     check=True
@@ -296,88 +279,37 @@ class EnvironmentCheckWorker(QThread):
                 self.item_result.emit(
                     item_name,
                     True,
-                    f"NASM is installed: {version}"
+                    f"Java is installed: {version}"
                 )
             except subprocess.SubprocessError:
                 self.item_result.emit(
                     item_name,
                     False,
-                    "NASM is installed but failed to get version"
-                )
-        elif gas_path:
-            try:
-                # Get gas version
-                result = subprocess.run(
-                    ["as", "--version"],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                version = result.stdout.split("\n")[0]
-                self.item_result.emit(
-                    item_name,
-                    True,
-                    f"GNU Assembler is installed: {version}"
-                )
-            except subprocess.SubprocessError:
-                self.item_result.emit(
-                    item_name,
-                    False,
-                    "GNU Assembler is installed but failed to get version"
+                    "Java is installed but failed to get version"
                 )
         else:
             self.item_result.emit(
                 item_name,
                 False,
-                "No Assembly tools found (optional, required for Assembly implementations)"
+                "Java tools not found (required for Java implementations)"
             )
     
-    def _check_python_crypto_libs(self, current_check, total_checks):
-        """Check Python crypto libraries."""
-        item_name = "Python Crypto Libraries"
+    def _check_zig_tools(self, current_check, total_checks):
+        """Check Zig tools."""
+        item_name = "Zig Compiler"
         self.progress_updated.emit(
             int((current_check / total_checks) * 100),
             f"Checking {item_name}..."
         )
         
-        # Check for cryptography package
-        try:
-            import importlib
-            cryptography_spec = importlib.util.find_spec("cryptography")
-            if cryptography_spec is not None:
-                import cryptography
-                version = cryptography.__version__
-                self.item_result.emit(
-                    item_name,
-                    True,
-                    f"cryptography {version} is installed"
-                )
-            else:
-                self.item_result.emit(
-                    item_name,
-                    False,
-                    "cryptography package not found (recommended for standard library comparison)"
-                )
-        except (ImportError, AttributeError):
-            self.item_result.emit(
-                item_name,
-                False,
-                "Failed to check cryptography package"
-            )
-    
-    def _check_c_crypto_libs(self, current_check, total_checks):
-        """Check C crypto libraries."""
-        item_name = "C Crypto Libraries"
-        self.progress_updated.emit(
-            int((current_check / total_checks) * 100),
-            f"Checking {item_name}..."
-        )
+        # Check for Zig compiler
+        zig_path = shutil.which("zig")
         
-        # Check for OpenSSL development files
-        if platform.system() == "Linux":
+        if zig_path:
             try:
+                # Get Zig version
                 result = subprocess.run(
-                    ["pkg-config", "--modversion", "openssl"],
+                    ["zig", "version"],
                     capture_output=True,
                     text=True,
                     check=True
@@ -386,115 +318,22 @@ class EnvironmentCheckWorker(QThread):
                 self.item_result.emit(
                     item_name,
                     True,
-                    f"OpenSSL development files {version} are installed"
+                    f"Zig is installed: {version}"
                 )
-            except (subprocess.SubprocessError, FileNotFoundError):
+            except subprocess.SubprocessError:
                 self.item_result.emit(
                     item_name,
                     False,
-                    "OpenSSL development files not found (recommended for standard library comparison)"
+                    "Zig is installed but failed to get version"
                 )
-        elif platform.system() == "Darwin":  # macOS
-            # Check for OpenSSL using brew or system libraries
-            if os.path.exists("/usr/local/opt/openssl") or os.path.exists("/opt/homebrew/opt/openssl"):
-                self.item_result.emit(
-                    item_name,
-                    True,
-                    "OpenSSL is installed via Homebrew"
-                )
-            elif os.path.exists("/usr/include/openssl/ssl.h"):
-                self.item_result.emit(
-                    item_name,
-                    True,
-                    "System OpenSSL development files are available"
-                )
-            else:
-                self.item_result.emit(
-                    item_name,
-                    False,
-                    "OpenSSL development files not found (recommended for standard library comparison)"
-                )
-        else:  # Windows or other
+        else:
             self.item_result.emit(
                 item_name,
                 False,
-                f"C crypto libraries check not implemented for {platform.system()}"
+                "Zig compiler not found (required for Zig implementations)"
             )
     
-    def _check_system_ram(self, current_check, total_checks):
-        """Check system RAM."""
-        item_name = "System RAM"
-        self.progress_updated.emit(
-            int((current_check / total_checks) * 100),
-            f"Checking {item_name}..."
-        )
-        
-        try:
-            import psutil
-            ram_gb = psutil.virtual_memory().total / (1024 ** 3)
-            
-            if ram_gb >= 16:
-                status = True
-                message = f"{ram_gb:.1f} GB RAM available (excellent)"
-            elif ram_gb >= 8:
-                status = True
-                message = f"{ram_gb:.1f} GB RAM available (good)"
-            elif ram_gb >= 4:
-                status = True
-                message = f"{ram_gb:.1f} GB RAM available (adequate)"
-            else:
-                status = False
-                message = f"Only {ram_gb:.1f} GB RAM available (may be insufficient for larger benchmarks)"
-            
-            self.item_result.emit(item_name, status, message)
-            
-        except ImportError:
-            self.item_result.emit(
-                item_name,
-                False,
-                "Failed to check system RAM (psutil not available)"
-            )
-    
-    def _check_disk_space(self, current_check, total_checks):
-        """Check disk space."""
-        item_name = "Disk Space"
-        self.progress_updated.emit(
-            int((current_check / total_checks) * 100),
-            f"Checking {item_name}..."
-        )
-        
-        try:
-            import psutil
-            
-            # Check the disk containing the current working directory
-            cwd = os.getcwd()
-            disk_usage = psutil.disk_usage(cwd)
-            
-            free_gb = disk_usage.free / (1024 ** 3)
-            
-            if free_gb >= 50:
-                status = True
-                message = f"{free_gb:.1f} GB free disk space available (excellent)"
-            elif free_gb >= 20:
-                status = True
-                message = f"{free_gb:.1f} GB free disk space available (good)"
-            elif free_gb >= 5:
-                status = True
-                message = f"{free_gb:.1f} GB free disk space available (adequate)"
-            else:
-                status = False
-                message = f"Only {free_gb:.1f} GB free disk space available (may be insufficient for larger datasets)"
-            
-            self.item_result.emit(item_name, status, message)
-            
-        except ImportError:
-            self.item_result.emit(
-                item_name,
-                False,
-                "Failed to check disk space (psutil not available)"
-            )
-    
-    def _check_cpu_capabilities(self, current_check, total_checks):
+    def _check_cpu_info(self, current_check, total_checks):
         """Check CPU capabilities."""
         item_name = "CPU Capabilities"
         self.progress_updated.emit(

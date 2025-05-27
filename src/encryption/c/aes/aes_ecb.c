@@ -2,25 +2,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../include/utils.h"
+#include "../include/crypto_utils.h"
 #include "aes_ecb.h"
 
-// Standard AES-ECB implementation (simple for now)
+// Standard AES-ECB implementation with authentication tag
 unsigned char* aes_ecb_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
-    
-    // For testing, we'll implement a simple ECB mode
-    // In a real implementation, this would use a proper AES-ECB mode
     
     // Calculate block padding (ECB operates on fixed block sizes)
     int block_size = 16; // AES block size is 16 bytes
     int padding_len = block_size - (data_length % block_size);
     if (padding_len == 0) padding_len = block_size; // Full block of padding if data is already aligned
     
-    // Calculate output size (original + padding)
-    int total_length = data_length + padding_len;
+    // Calculate tag size for authentication
+    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(total_length);
+    // Calculate output size (original + padding + tag)
+    int total_length = data_length + padding_len + tag_size;
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
@@ -33,12 +34,21 @@ unsigned char* aes_ecb_encrypt(aes_context_t* context, const unsigned char* data
     memset(output + data_length, padding_len, padding_len);
     
     // Simple ECB encryption with key (process each block independently)
-    for (int i = 0; i < total_length; i += block_size) {
+    for (int i = 0; i < data_length + padding_len; i += block_size) {
         // Process each block
         for (int j = 0; j < block_size; j++) {
             // Simple XOR encryption with key
             output[i + j] ^= context->key[(i + j) % context->key_length];
         }
+    }
+    
+    // Generate authentication tag for the encrypted data
+    unsigned char* tag = output + data_length + padding_len;
+    if (!crypto_generate_authentication_tag(tag, tag_size, output, data_length + padding_len,
+                                          context->key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(output, total_length);
+        return NULL;
     }
     
     // Set the output length
@@ -52,40 +62,59 @@ unsigned char* aes_ecb_encrypt(aes_context_t* context, const unsigned char* data
 unsigned char* aes_ecb_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For testing, we'll implement a simple ECB decryption
-    // In a real implementation, this would use a proper AES-ECB mode
-    
     int block_size = 16; // AES block size is 16 bytes
+    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
     
-    // Check if data length is a multiple of block size
-    if (data_length % block_size != 0) {
+    // Ensure we have enough data (at least one block and tag)
+    if (data_length <= block_size + tag_size) {
+        fprintf(stderr, "Error: Not enough data for ECB decryption\n");
+        return NULL;
+    }
+    
+    // Calculate the size of encrypted data (without tag)
+    int encrypted_len = data_length - tag_size;
+    
+    // Check if encrypted data length is a multiple of block size
+    if (encrypted_len % block_size != 0) {
         fprintf(stderr, "Error: Invalid data length for ECB decryption\n");
         return NULL;
     }
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(data_length);
+    // Verify the authentication tag first
+    const unsigned char* tag = data + encrypted_len;
+    
+    if (!crypto_verify_authentication_tag(tag, tag_size, data, encrypted_len,
+                                        context->key, context->key_length)) {
+        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
+        return NULL; // Fail securely on authentication failure
+    }
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(encrypted_len);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
         return NULL;
     }
     
+    // Copy data for decryption
+    memcpy(output, data, encrypted_len);
+    
     // Simple ECB decryption with key (process each block independently)
-    for (int i = 0; i < data_length; i += block_size) {
+    for (int i = 0; i < encrypted_len; i += block_size) {
         // Process each block
         for (int j = 0; j < block_size; j++) {
             // Simple XOR decryption with key (same as encryption for XOR)
-            output[i + j] = data[i + j] ^ context->key[(i + j) % context->key_length];
+            output[i + j] ^= context->key[(i + j) % context->key_length];
         }
     }
     
     // Check and remove PKCS#7 padding
-    unsigned char padding_value = output[data_length - 1];
+    unsigned char padding_value = output[encrypted_len - 1];
     if (padding_value > 0 && padding_value <= block_size) {
         // Verify padding
         int valid_padding = 1;
         for (int i = 0; i < padding_value; i++) {
-            if (output[data_length - 1 - i] != padding_value) {
+            if (output[encrypted_len - 1 - i] != padding_value) {
                 valid_padding = 0;
                 break;
             }
@@ -94,7 +123,7 @@ unsigned char* aes_ecb_decrypt(aes_context_t* context, const unsigned char* data
         if (valid_padding) {
             // Set the actual output length
             if (output_length) {
-                *output_length = data_length - padding_value;
+                *output_length = encrypted_len - padding_value;
             }
             return output;
         }
@@ -102,28 +131,29 @@ unsigned char* aes_ecb_decrypt(aes_context_t* context, const unsigned char* data
     
     // If we got here, padding is invalid or not present
     if (output_length) {
-        *output_length = data_length;
+        *output_length = encrypted_len;
     }
     
     return output;
 }
 
-// Custom AES-ECB implementation
+// Custom AES-ECB implementation with authentication
 unsigned char* aes_ecb_custom_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
-    
-    // For testing, we'll implement a custom ECB mode with a modified approach
     
     // Calculate block padding (ECB operates on fixed block sizes)
     int block_size = 16; // AES block size is 16 bytes
     int padding_len = block_size - (data_length % block_size);
     if (padding_len == 0) padding_len = block_size; // Full block of padding if data is already aligned
     
-    // Calculate output size (original + padding)
-    int total_length = data_length + padding_len;
+    // Calculate tag size for authentication
+    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(total_length);
+    // Calculate output size (original + padding + tag)
+    int total_length = data_length + padding_len + tag_size;
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
@@ -135,11 +165,11 @@ unsigned char* aes_ecb_custom_encrypt(aes_context_t* context, const unsigned cha
     // Add PKCS#7 padding
     memset(output + data_length, padding_len, padding_len);
     
-    // Create a rotated key for a different pattern
-    unsigned char* rotated_key = (unsigned char*)malloc(context->key_length);
+    // Create a rotated key for a different pattern using secure allocation
+    unsigned char* rotated_key = (unsigned char*)crypto_secure_alloc(context->key_length);
     if (!rotated_key) {
         fprintf(stderr, "Error: Could not allocate memory for rotated key\n");
-        free(output);
+        crypto_secure_free(output, total_length);
         return NULL;
     }
     
@@ -153,14 +183,14 @@ unsigned char* aes_ecb_custom_encrypt(aes_context_t* context, const unsigned cha
     }
     
     // Custom ECB encryption with block scrambling
-    for (int i = 0; i < total_length; i += block_size) {
+    for (int i = 0; i < data_length + padding_len; i += block_size) {
         // First pass: XOR with rotated key
         for (int j = 0; j < block_size; j++) {
             output[i + j] ^= rotated_key[j % context->key_length];
         }
         
         // Second pass: Scramble the block by rotating bytes
-        if (i + block_size <= total_length) {
+        if (i + block_size <= data_length + padding_len) {
             // Save first byte
             unsigned char temp = output[i];
             // Shift each byte in the block
@@ -175,7 +205,19 @@ unsigned char* aes_ecb_custom_encrypt(aes_context_t* context, const unsigned cha
         }
     }
     
-    free(rotated_key);
+    // Generate authentication tag using rotated key
+    unsigned char* tag = output + data_length + padding_len;
+    if (!crypto_generate_authentication_tag(tag, tag_size, 
+                                          output, data_length + padding_len,
+                                          rotated_key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        crypto_secure_free(output, total_length);
+        return NULL;
+    }
+    
+    // Securely free rotated key
+    crypto_secure_free(rotated_key, context->key_length);
     
     // Set the output length
     if (output_length) {
@@ -189,28 +231,27 @@ unsigned char* aes_ecb_custom_decrypt(aes_context_t* context, const unsigned cha
     if (!context || !data || data_length <= 0) return NULL;
     
     int block_size = 16; // AES block size is 16 bytes
+    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
     
-    // Check if data length is a multiple of block size
-    if (data_length % block_size != 0) {
+    // Ensure we have enough data (at least one block and tag)
+    if (data_length <= block_size + tag_size) {
+        fprintf(stderr, "Error: Not enough data for ECB decryption\n");
+        return NULL;
+    }
+    
+    // Calculate the size of encrypted data (without tag)
+    int encrypted_len = data_length - tag_size;
+    
+    // Check if encrypted data length is a multiple of block size
+    if (encrypted_len % block_size != 0) {
         fprintf(stderr, "Error: Invalid data length for ECB decryption\n");
         return NULL;
     }
     
-    // Allocate memory for output and working copy
-    unsigned char* output = (unsigned char*)malloc(data_length);
-    if (!output) {
-        fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
-        return NULL;
-    }
-    
-    // Create working copy to avoid modifying original data
-    memcpy(output, data, data_length);
-    
     // Create a rotated key for a different pattern (same as in encryption)
-    unsigned char* rotated_key = (unsigned char*)malloc(context->key_length);
+    unsigned char* rotated_key = (unsigned char*)crypto_secure_alloc(context->key_length);
     if (!rotated_key) {
         fprintf(stderr, "Error: Could not allocate memory for rotated key\n");
-        free(output);
         return NULL;
     }
     
@@ -223,15 +264,36 @@ unsigned char* aes_ecb_custom_decrypt(aes_context_t* context, const unsigned cha
         rotated_key[context->key_length - 1] = temp;
     }
     
+    // Verify the authentication tag first
+    const unsigned char* tag = data + encrypted_len;
+    
+    if (!crypto_verify_authentication_tag(tag, tag_size, data, encrypted_len,
+                                        rotated_key, context->key_length)) {
+        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        return NULL; // Fail securely on authentication failure
+    }
+    
+    // Allocate memory for output and working copy using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(encrypted_len);
+    if (!output) {
+        fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        return NULL;
+    }
+    
+    // Create working copy to avoid modifying original data
+    memcpy(output, data, encrypted_len);
+    
     // Custom ECB decryption (reverse the encryption steps)
-    for (int i = 0; i < data_length; i += block_size) {
+    for (int i = 0; i < encrypted_len; i += block_size) {
         // First pass: Undo the block index XOR
         for (int j = 0; j < block_size; j++) {
             output[i + j] ^= (i / block_size) % 256;
         }
         
         // Second pass: Unscramble the block by rotating bytes back
-        if (i + block_size <= data_length) {
+        if (i + block_size <= encrypted_len) {
             // Save last byte
             unsigned char temp = output[i + block_size - 1];
             // Shift each byte in the block
@@ -246,15 +308,16 @@ unsigned char* aes_ecb_custom_decrypt(aes_context_t* context, const unsigned cha
         }
     }
     
-    free(rotated_key);
+    // Securely free rotated key
+    crypto_secure_free(rotated_key, context->key_length);
     
     // Check and remove PKCS#7 padding
-    unsigned char padding_value = output[data_length - 1];
+    unsigned char padding_value = output[encrypted_len - 1];
     if (padding_value > 0 && padding_value <= block_size) {
         // Verify padding
         int valid_padding = 1;
         for (int i = 0; i < padding_value; i++) {
-            if (output[data_length - 1 - i] != padding_value) {
+            if (output[encrypted_len - 1 - i] != padding_value) {
                 valid_padding = 0;
                 break;
             }
@@ -263,7 +326,7 @@ unsigned char* aes_ecb_custom_decrypt(aes_context_t* context, const unsigned cha
         if (valid_padding) {
             // Set the actual output length
             if (output_length) {
-                *output_length = data_length - padding_value;
+                *output_length = encrypted_len - padding_value;
             }
             return output;
         }
@@ -271,7 +334,7 @@ unsigned char* aes_ecb_custom_decrypt(aes_context_t* context, const unsigned cha
     
     // If we got here, padding is invalid or not present
     if (output_length) {
-        *output_length = data_length;
+        *output_length = encrypted_len;
     }
     
     return output;

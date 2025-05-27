@@ -35,22 +35,6 @@ const char* ecc_get_curve_name(ecc_curve_type_t curve) {
     }
 }
 
-// Set the curve for an ECC context
-int ecc_set_curve(ecc_context_t* context, ecc_curve_type_t curve) {
-    if (!context) return 0;
-    
-    // If there's an existing key, free it
-    if (context->ec_key) {
-        EC_KEY_free(context->ec_key);
-        context->ec_key = NULL;
-    }
-    
-    // Set the new curve
-    context->curve = curve;
-    
-    return 1;
-}
-
 // Generate an ECC key pair
 EC_KEY* ecc_generate_key_pair(ecc_curve_type_t curve) {
     int nid = ecc_get_nid_for_curve(curve);

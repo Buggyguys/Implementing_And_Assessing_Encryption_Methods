@@ -19,8 +19,8 @@
 #include <sys/sysinfo.h>
 #endif
 
-// Include json-c for JSON parsing
-#include <json-c/json.h>
+// Include cJSON for JSON parsing
+#include "include/cJSON.h"
 
 // Include our own headers
 #include "c_core.h"
@@ -42,37 +42,55 @@
 
 // Metrics structure to track performance data
 typedef struct {
-    // Key Generation metrics
-    double keygen_wall_time_ms;
-    double keygen_cpu_user_time_s;
-    double keygen_cpu_system_time_s;
-    size_t keygen_peak_rss_bytes;
-    unsigned long keygen_ctx_switches_voluntary;
-    unsigned long keygen_ctx_switches_involuntary;
-    size_t key_size_bytes;
-    int num_keys;
+    // Time Measurements (in nanoseconds for precision)
+    uint64_t keygen_time_ns;              // Raw time to generate keys
+    uint64_t encrypt_time_ns;             // Raw time to encrypt data
+    uint64_t decrypt_time_ns;             // Raw time to decrypt data
     
-    // Encryption metrics
-    double encrypt_wall_time_ms;
-    double encrypt_cpu_user_time_s;
-    double encrypt_cpu_system_time_s;
-    size_t encrypt_peak_rss_bytes;
-    size_t encrypt_disk_read_bytes;
-    size_t encrypt_disk_write_bytes;
-    unsigned long encrypt_ctx_switches_voluntary;
-    unsigned long encrypt_ctx_switches_involuntary;
-    size_t ciphertext_total_bytes;
+    // Memory Usage
+    size_t keygen_peak_memory_bytes;      // Peak memory during key generation
+    size_t encrypt_peak_memory_bytes;     // Peak memory during encryption
+    size_t decrypt_peak_memory_bytes;     // Peak memory during decryption
+    size_t keygen_allocated_memory_bytes; // Total memory allocated during key generation
+    size_t encrypt_allocated_memory_bytes; // Total memory allocated during encryption
+    size_t decrypt_allocated_memory_bytes; // Total memory allocated during decryption
     
-    // Decryption metrics
-    double decrypt_wall_time_ms;
-    double decrypt_cpu_user_time_s;
-    double decrypt_cpu_system_time_s;
-    size_t decrypt_peak_rss_bytes;
-    size_t decrypt_disk_read_bytes;
-    size_t decrypt_disk_write_bytes;
-    unsigned long decrypt_ctx_switches_voluntary;
-    unsigned long decrypt_ctx_switches_involuntary;
-    int correctness_passed;
+    // CPU Utilization
+    uint64_t keygen_cpu_time_ns;          // CPU time used for key generation
+    uint64_t encrypt_cpu_time_ns;         // CPU time used for encryption
+    uint64_t decrypt_cpu_time_ns;         // CPU time used for decryption
+    double keygen_cpu_percent;            // CPU utilization percentage during key gen
+    double encrypt_cpu_percent;           // CPU utilization percentage during encryption
+    double decrypt_cpu_percent;           // CPU utilization percentage during decryption
+    
+    // Data Processing
+    size_t input_size_bytes;              // Size of input data
+    size_t ciphertext_size_bytes;         // Size of ciphertext
+    size_t decrypted_size_bytes;          // Size of decrypted output
+    
+    // Operation-Specific
+    size_t iv_size_bytes;                 // Size of initialization vector
+    int key_size_bits;                    // Key size in bits
+    size_t key_size_bytes;                // Key size in bytes
+    int block_size_bytes;                 // Block size for block ciphers
+    int num_rounds;                       // Number of rounds used
+    
+    // System Information
+    int thread_count;                     // Number of threads used
+    int process_priority;                 // Process priority/nice value
+    
+    // Context Switches and Cache
+    unsigned long ctx_switches_voluntary;  // Voluntary context switches
+    unsigned long ctx_switches_involuntary; // Involuntary context switches
+    unsigned long page_faults;             // Number of page faults
+    unsigned long cache_misses;            // Number of cache misses (if available)
+    
+    // Implementation Details
+    int is_custom_implementation;         // 1 for custom, 0 for library
+    char library_version[64];             // Library version if using standard lib
+    
+    // Correctness check
+    int correctness_passed;               // 1 if decryption matches original, 0 otherwise
 } BenchmarkMetrics;
 
 // Global registry to store all implementations
@@ -187,114 +205,113 @@ TestConfig* parse_config_file(const char* config_path) {
     config_content[file_size] = '\0';
     
     // Parse the JSON
-    struct json_object* root = json_tokener_parse(config_content);
+    cJSON* root = cJSON_Parse(config_content);
     free(config_content);
     
     if (!root) {
-        fprintf(stderr, "Error: Failed to parse JSON\n");
+        fprintf(stderr, "Error: Failed to parse JSON: %s\n", cJSON_GetErrorPtr());
         free(config);
         return NULL;
     }
     
     // Extract C language configuration (we only care about C since we're the C implementation)
-    struct json_object* languages = NULL;
-    if (json_object_object_get_ex(root, "languages", &languages)) {
-        struct json_object* c_lang = NULL;
-        if (json_object_object_get_ex(languages, "c", &c_lang)) {
-            struct json_object* is_enabled = NULL;
-            if (json_object_object_get_ex(c_lang, "is_enabled", &is_enabled)) {
-                if (!json_object_get_boolean(is_enabled)) {
-                    // C tests are not enabled, we can return early
-                    fprintf(stderr, "C tests are not enabled in the configuration\n");
-                    json_object_put(root);
-                    free(config);
-                    return NULL;
+    cJSON* languages = cJSON_GetObjectItem(root, "languages");
+    if (languages) {
+        cJSON* c_lang = cJSON_GetObjectItem(languages, "c");
+        if (c_lang) {
+            cJSON* is_enabled = cJSON_GetObjectItem(c_lang, "is_enabled");
+            if (is_enabled && cJSON_IsBool(is_enabled)) {
+                if (!cJSON_IsTrue(is_enabled)) {
+                    printf("Warning: C language is not enabled in the configuration. Continuing anyway.\n");
                 }
             }
         }
     }
     
+    // Extract algorithm configurations
+    // Note: We're not using encryption_methods directly, but the values are extracted elsewhere
+    
     // Extract test parameters
-    struct json_object* test_params = NULL;
-    if (json_object_object_get_ex(root, "test_parameters", &test_params)) {
-        // Get iterations
-        struct json_object* iterations = NULL;
-        if (json_object_object_get_ex(test_params, "iterations", &iterations)) {
-            config->iterations = json_object_get_int(iterations);
+    cJSON* test_params = cJSON_GetObjectItem(root, "test_parameters");
+    if (test_params) {
+        cJSON* iterations = cJSON_GetObjectItem(test_params, "iterations");
+        if (iterations && cJSON_IsNumber(iterations)) {
+            config->iterations = iterations->valueint;
         }
         
-        // Get dataset path
-        struct json_object* dataset_path = NULL;
-        if (json_object_object_get_ex(test_params, "dataset_path", &dataset_path)) {
-            strncpy(config->dataset_path, json_object_get_string(dataset_path), sizeof(config->dataset_path) - 1);
+        cJSON* dataset_path = cJSON_GetObjectItem(test_params, "dataset_path");
+        if (dataset_path && cJSON_IsString(dataset_path)) {
+            strncpy(config->dataset_path, dataset_path->valuestring, sizeof(config->dataset_path) - 1);
         }
         
-        // Get implementation options
-        struct json_object* use_stdlib = NULL;
-        if (json_object_object_get_ex(test_params, "use_stdlib", &use_stdlib)) {
-            config->use_stdlib = json_object_get_boolean(use_stdlib);
+        cJSON* use_stdlib = cJSON_GetObjectItem(test_params, "use_stdlib");
+        if (use_stdlib && cJSON_IsBool(use_stdlib)) {
+            config->use_stdlib = cJSON_IsTrue(use_stdlib) ? 1 : 0;
         }
         
-        struct json_object* use_custom = NULL;
-        if (json_object_object_get_ex(test_params, "use_custom", &use_custom)) {
-            config->use_custom = json_object_get_boolean(use_custom);
+        cJSON* use_custom = cJSON_GetObjectItem(test_params, "use_custom");
+        if (use_custom && cJSON_IsBool(use_custom)) {
+            config->use_custom = cJSON_IsTrue(use_custom) ? 1 : 0;
         }
         
-        // Get processing strategy
-        struct json_object* processing_strategy = NULL;
-        if (json_object_object_get_ex(test_params, "processing_strategy", &processing_strategy)) {
-            strncpy(config->processing_strategy, json_object_get_string(processing_strategy), sizeof(config->processing_strategy) - 1);
+        cJSON* processing_strategy = cJSON_GetObjectItem(test_params, "processing_strategy");
+        if (processing_strategy && cJSON_IsString(processing_strategy)) {
+            strncpy(config->processing_strategy, processing_strategy->valuestring, sizeof(config->processing_strategy) - 1);
+            config->memory_mode = strcmp(config->processing_strategy, "Memory") == 0 ? 1 : 0;
         }
         
-        // Get chunk size
-        struct json_object* chunk_size = NULL;
-        if (json_object_object_get_ex(test_params, "chunk_size", &chunk_size)) {
-            strncpy(config->chunk_size, json_object_get_string(chunk_size), sizeof(config->chunk_size) - 1);
+        cJSON* chunk_size = cJSON_GetObjectItem(test_params, "chunk_size");
+        if (chunk_size && cJSON_IsString(chunk_size)) {
+            strncpy(config->chunk_size, chunk_size->valuestring, sizeof(config->chunk_size) - 1);
         }
     }
     
-    // Get results directory from the session info
-    struct json_object* session_info = NULL;
-    if (json_object_object_get_ex(root, "session_info", &session_info)) {
-        struct json_object* session_dir = NULL;
-        if (json_object_object_get_ex(session_info, "session_dir", &session_dir)) {
-            snprintf(config->results_dir, sizeof(config->results_dir), "%s/results", json_object_get_string(session_dir));
+    // Extract session information
+    cJSON* session_info = cJSON_GetObjectItem(root, "session_info");
+    if (session_info) {
+        cJSON* session_dir = cJSON_GetObjectItem(session_info, "session_dir");
+        if (session_dir && cJSON_IsString(session_dir)) {
+            strncpy(config->session_dir, session_dir->valuestring, sizeof(config->session_dir) - 1);
         }
     }
     
-    // Get dataset size from the dataset info
-    struct json_object* dataset_info = NULL;
-    if (json_object_object_get_ex(root, "dataset_info", &dataset_info)) {
-        struct json_object* file_size_kb = NULL;
-        if (json_object_object_get_ex(dataset_info, "file_size_kb", &file_size_kb)) {
-            config->dataset_size = (size_t)(json_object_get_double(file_size_kb) * 1024);
+    // Extract dataset information
+    cJSON* dataset_info = cJSON_GetObjectItem(root, "dataset_info");
+    if (dataset_info) {
+        cJSON* file_size_kb = cJSON_GetObjectItem(dataset_info, "file_size_kb");
+        if (file_size_kb && cJSON_IsNumber(file_size_kb)) {
+            config->dataset_size_kb = (int)file_size_kb->valuedouble;
         }
-    } else {
-        // If dataset_info is not available, get file size from the dataset file
+    }
+    
+    // If dataset path is provided, check file size
+    if (strlen(config->dataset_path) > 0) {
         struct stat st;
         if (stat(config->dataset_path, &st) == 0) {
-            config->dataset_size = st.st_size;
+            config->dataset_size_bytes = st.st_size;
+            printf("Dataset size: %zu bytes\n", config->dataset_size_bytes);
+        } else {
+            fprintf(stderr, "Warning: Could not determine dataset size: %s\n", strerror(errno));
         }
     }
     
-    // Clean up
-    json_object_put(root);
-    
-    // Validate essential fields
-    if (strlen(config->dataset_path) == 0) {
-        fprintf(stderr, "Error: Dataset path is not specified in configuration\n");
-        free(config);
-        return NULL;
+    // Create results directory if it doesn't exist
+    if (strlen(config->session_dir) > 0) {
+        char results_dir[512];
+        snprintf(results_dir, sizeof(results_dir), "%s/results", config->session_dir);
+        
+        // Create directory if it doesn't exist
+        struct stat st = {0};
+        if (stat(results_dir, &st) == -1) {
+            #ifdef _WIN32
+            mkdir(results_dir);
+            #else
+            mkdir(results_dir, 0700);
+            #endif
+        }
     }
     
-    if (strlen(config->results_dir) == 0) {
-        fprintf(stderr, "Error: Results directory is not specified in configuration\n");
-        free(config);
-        return NULL;
-    }
-    
-    // Instead of printing verbose configuration details here, just log we successfully parsed the config
-    printf("Configuration parsed successfully\n");
+    cJSON_Delete(root);
     
     return config;
 }
@@ -313,22 +330,22 @@ void run_benchmarks(TestConfig* config) {
     
     // Create results directory if it doesn't exist
     char mkdir_cmd[1024];
-    snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p %s", config->results_dir);
+    snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p %s", config->session_dir);
     system(mkdir_cmd);
     
     // Create the results structure
-    struct json_object* results_obj = json_object_new_object();
+    cJSON* results_obj = cJSON_CreateObject();
     
     // Add timestamp, session ID, and language
     char timestamp[64];
     time_t now = time(NULL);
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%S", localtime(&now));
-    json_object_object_add(results_obj, "timestamp", json_object_new_string(timestamp));
+    cJSON_AddStringToObject(results_obj, "timestamp", timestamp);
     
     // Extract session_id from results_dir path
     char* session_id = NULL;
     char results_dir_copy[MAX_PATH_LENGTH];
-    strncpy(results_dir_copy, config->results_dir, sizeof(results_dir_copy) - 1);
+    strncpy(results_dir_copy, config->session_dir, sizeof(results_dir_copy) - 1);
     
     // Find the last directory in the path (session ID)
     char* last_slash = strrchr(results_dir_copy, '/');
@@ -341,36 +358,36 @@ void run_benchmarks(TestConfig* config) {
     }
     
     if (session_id) {
-        json_object_object_add(results_obj, "session_id", json_object_new_string(session_id));
+        cJSON_AddStringToObject(results_obj, "session_id", session_id);
     } else {
         // Fallback: use current date/time as session id
-        json_object_object_add(results_obj, "session_id", json_object_new_string(getTimeString()));
+        cJSON_AddStringToObject(results_obj, "session_id", getTimeString());
     }
     
-    json_object_object_add(results_obj, "language", json_object_new_string("c"));
+    cJSON_AddStringToObject(results_obj, "language", "c");
     
     // Add dataset info
-    struct json_object* dataset_obj = json_object_new_object();
-    json_object_object_add(dataset_obj, "path", json_object_new_string(config->dataset_path));
-    json_object_object_add(dataset_obj, "size_bytes", json_object_new_int64(config->dataset_size));
-    json_object_object_add(results_obj, "dataset", dataset_obj);
+    cJSON* dataset_obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(dataset_obj, "path", config->dataset_path);
+    cJSON_AddNumberToObject(dataset_obj, "size_bytes", config->dataset_size_bytes);
+    cJSON_AddItemToObject(results_obj, "dataset", dataset_obj);
     
     // Add test configuration
-    struct json_object* test_config_obj = json_object_new_object();
-    json_object_object_add(test_config_obj, "iterations", json_object_new_int(config->iterations));
-    json_object_object_add(test_config_obj, "processing_strategy", json_object_new_string(config->processing_strategy));
-    json_object_object_add(test_config_obj, "use_stdlib_implementations", json_object_new_boolean(config->use_stdlib));
-    json_object_object_add(test_config_obj, "use_custom_implementations", json_object_new_boolean(config->use_custom));
+    cJSON* test_config_obj = cJSON_CreateObject();
+    cJSON_AddNumberToObject(test_config_obj, "iterations", config->iterations);
+    cJSON_AddStringToObject(test_config_obj, "processing_strategy", config->processing_strategy);
+    cJSON_AddBoolToObject(test_config_obj, "use_stdlib_implementations", config->use_stdlib);
+    cJSON_AddBoolToObject(test_config_obj, "use_custom_implementations", config->use_custom);
     
     // Add chunk size to configuration if using stream processing
     if (strcmp(config->processing_strategy, "Stream") == 0) {
-        json_object_object_add(test_config_obj, "chunk_size", json_object_new_string(config->chunk_size));
+        cJSON_AddStringToObject(test_config_obj, "chunk_size", config->chunk_size);
     }
     
-    json_object_object_add(results_obj, "test_configuration", test_config_obj);
+    cJSON_AddItemToObject(results_obj, "test_configuration", test_config_obj);
     
     // Create encryption_results container
-    struct json_object* encryption_results_obj = json_object_new_object();
+    cJSON* encryption_results_obj = cJSON_CreateObject();
     
     // Determine the processing strategy and load test data
     processing_strategy_t strategy = PROCESSING_MEMORY;
@@ -385,7 +402,7 @@ void run_benchmarks(TestConfig* config) {
         test_data = read_file(config->dataset_path, &data_size);
         if (!test_data) {
             fprintf(stderr, "Error: Could not read test data\n");
-            json_object_put(results_obj);
+            cJSON_Delete(results_obj);
             return;
         }
     }
@@ -407,22 +424,10 @@ void run_benchmarks(TestConfig* config) {
         printf("Running benchmark for %s\n", description);
         
         // For each implementation, run the benchmark multiple times according to iterations
-        struct json_object* impl_obj = json_object_new_object();
+        cJSON* impl_obj = cJSON_CreateObject();
         
         // Create iterations array for this implementation
-        struct json_object* iterations_array = json_object_new_array();
-        
-        // These will be used for aggregated metrics
-        double total_keygen_time = 0;
-        double total_encrypt_time = 0;
-        double total_decrypt_time = 0;
-        size_t total_keygen_memory = 0;
-        size_t total_encrypt_memory = 0;
-        size_t total_decrypt_memory = 0;
-        double total_encrypt_throughput = 0;
-        double total_decrypt_throughput = 0;
-        int correctness_failures = 0;
-        size_t total_ciphertext_size = 0;
+        cJSON* iterations_array = cJSON_CreateArray();
         
         // Run iterations
         for (int iter = 0; iter < config->iterations; iter++) {
@@ -436,20 +441,20 @@ void run_benchmarks(TestConfig* config) {
             }
             
             // Create iteration object
-            struct json_object* iter_obj = json_object_new_object();
-            json_object_object_add(iter_obj, "iteration", json_object_new_int(iter + 1));
+            cJSON* iter_obj = cJSON_CreateObject();
+            cJSON_AddNumberToObject(iter_obj, "iteration", iter + 1);
             
             // Record metrics for key generation
             printf("    Generating key...\n");
             
-            // Measure key generation
-            double keygen_start_time = get_time_ms();
+            // Measure key generation with nanosecond precision
+            uint64_t keygen_start_time = get_time_ns();
             resource_usage_t keygen_start_usage = get_resource_usage();
             
             int key_length = 0;
             unsigned char* key = impl->generate_key(ctx, &key_length);
             
-            double keygen_end_time = get_time_ms();
+            uint64_t keygen_end_time = get_time_ns();
             resource_usage_t keygen_end_usage = get_resource_usage();
             resource_usage_t keygen_diff = resource_usage_diff(keygen_start_usage, keygen_end_usage);
             
@@ -459,37 +464,49 @@ void run_benchmarks(TestConfig* config) {
                 continue;
             }
             
-            double keygen_time = keygen_end_time - keygen_start_time;
+            // Store metrics in nanoseconds for precision
+            BenchmarkMetrics metrics = {0};
             
-            // Add key generation metrics to iteration object directly
-            json_object_object_add(iter_obj, "keygen_wall_time_ms", json_object_new_double(keygen_time));
-            json_object_object_add(iter_obj, "keygen_peak_rss_bytes", json_object_new_int64(keygen_diff.peak_memory_bytes));
-            // Add CPU metrics that Python tracks
-            json_object_object_add(iter_obj, "keygen_cpu_user_time_s", json_object_new_double(keygen_diff.user_time_s));
-            json_object_object_add(iter_obj, "keygen_cpu_system_time_s", json_object_new_double(keygen_diff.system_time_s));
-            json_object_object_add(iter_obj, "keygen_ctx_switches_voluntary", json_object_new_int64(keygen_diff.voluntary_ctx_switches));
-            json_object_object_add(iter_obj, "keygen_ctx_switches_involuntary", json_object_new_int64(keygen_diff.involuntary_ctx_switches));
-            // Add key size and number of keys
-            json_object_object_add(iter_obj, "key_size_bytes", json_object_new_int(key_length));
-            json_object_object_add(iter_obj, "num_keys", json_object_new_int(1)); // Default to 1 key for now
+            // Key generation metrics
+            metrics.keygen_time_ns = keygen_end_time - keygen_start_time;
+            metrics.keygen_cpu_time_ns = keygen_diff.cpu_time_ns;
+            metrics.keygen_cpu_percent = keygen_diff.cpu_percent;
+            metrics.keygen_peak_memory_bytes = keygen_diff.peak_memory_bytes;
+            metrics.keygen_allocated_memory_bytes = keygen_diff.allocated_memory_bytes;
+            metrics.key_size_bytes = key_length;
+            metrics.key_size_bits = key_length * 8; // Estimate, implementation may override
             
-            total_keygen_time += keygen_time;
-            total_keygen_memory += keygen_diff.peak_memory_bytes;
+            // Add implementation details
+            metrics.is_custom_implementation = impl->is_custom;
             
-            // Measure encryption
+            // Add key generation metrics to iteration object
+            cJSON_AddNumberToObject(iter_obj, "keygen_time_ns", (double)metrics.keygen_time_ns);
+            cJSON_AddNumberToObject(iter_obj, "keygen_cpu_time_ns", (double)metrics.keygen_cpu_time_ns);
+            cJSON_AddNumberToObject(iter_obj, "keygen_cpu_percent", metrics.keygen_cpu_percent);
+            cJSON_AddNumberToObject(iter_obj, "keygen_peak_memory_bytes", (double)metrics.keygen_peak_memory_bytes);
+            cJSON_AddNumberToObject(iter_obj, "keygen_allocated_memory_bytes", (double)metrics.keygen_allocated_memory_bytes);
+            cJSON_AddNumberToObject(iter_obj, "keygen_page_faults", (double)keygen_diff.page_faults);
+            cJSON_AddNumberToObject(iter_obj, "keygen_ctx_switches_voluntary", (double)keygen_diff.voluntary_ctx_switches);
+            cJSON_AddNumberToObject(iter_obj, "keygen_ctx_switches_involuntary", (double)keygen_diff.involuntary_ctx_switches);
+            cJSON_AddNumberToObject(iter_obj, "key_size_bytes", (double)key_length);
+            cJSON_AddNumberToObject(iter_obj, "key_size_bits", (double)(key_length * 8));
+            cJSON_AddNumberToObject(iter_obj, "thread_count", keygen_diff.thread_count);
+            cJSON_AddNumberToObject(iter_obj, "process_priority", keygen_diff.process_priority);
+            
+            // Measure encryption with nanosecond precision
             unsigned char* ciphertext = NULL;
             int ciphertext_length = 0;
-            double encrypt_time = 0;
+            uint64_t encrypt_time_ns = 0;
             resource_usage_t encrypt_diff = {0};
             
             if (strategy == PROCESSING_MEMORY) {
                 printf("    Encrypting data (Memory mode)...\n");
-                double encrypt_start_time = get_time_ms();
+                uint64_t encrypt_start_time = get_time_ns();
                 resource_usage_t encrypt_start_usage = get_resource_usage();
                 
                 ciphertext = impl->encrypt(ctx, test_data, data_size, key, &ciphertext_length);
                 
-                double encrypt_end_time = get_time_ms();
+                uint64_t encrypt_end_time = get_time_ns();
                 resource_usage_t encrypt_end_usage = get_resource_usage();
                 encrypt_diff = resource_usage_diff(encrypt_start_usage, encrypt_end_usage);
                 
@@ -500,7 +517,7 @@ void run_benchmarks(TestConfig* config) {
                     continue;
                 }
                 
-                encrypt_time = encrypt_end_time - encrypt_start_time;
+                encrypt_time_ns = encrypt_end_time - encrypt_start_time;
             } else {
                 // Stream processing - encrypt in chunks
                 printf("    Encrypting data (Stream mode)...\n");
@@ -517,7 +534,7 @@ void run_benchmarks(TestConfig* config) {
                 printf("    Dataset will be processed in %zu chunks\n", total_chunks);
                 
                 // Allocate buffer for all ciphertext (approximate size)
-                size_t max_ciphertext_size = cf->file_size + (cf->file_size / 10) + 1024; // Add some extra space
+                size_t max_ciphertext_size = cf->file_size + (cf->file_size / 10) + 1024 + (total_chunks * 8); // Add space for chunk headers
                 ciphertext = (unsigned char*)malloc(max_ciphertext_size);
                 if (!ciphertext) {
                     fprintf(stderr, "Error: Failed to allocate memory for ciphertext\n");
@@ -527,7 +544,18 @@ void run_benchmarks(TestConfig* config) {
                     continue;
                 }
                 
-                double encrypt_start_time = get_time_ms();
+                // Array to store chunk sizes for proper decryption
+                size_t* chunk_sizes = (size_t*)malloc(total_chunks * sizeof(size_t));
+                if (!chunk_sizes) {
+                    fprintf(stderr, "Error: Failed to allocate memory for chunk sizes\n");
+                    free(ciphertext);
+                    cleanup_chunked_file(cf);
+                    free(key);
+                    impl->cleanup(ctx);
+                    continue;
+                }
+                
+                uint64_t encrypt_start_time = get_time_ns();
                 resource_usage_t encrypt_start_usage = get_resource_usage();
                 
                 ciphertext_length = 0;
@@ -548,18 +576,31 @@ void run_benchmarks(TestConfig* config) {
                     if (!chunk_ciphertext) {
                         fprintf(stderr, "Error: Chunk encryption failed\n");
                         free(ciphertext);
+                        free(chunk_sizes);
                         ciphertext = NULL;
                         break;
                     }
                     
-                    // Copy chunk result to full ciphertext buffer
-                    if (ciphertext_length + chunk_output_length <= max_ciphertext_size) {
+                    // Store chunk size for decryption
+                    chunk_sizes[chunk_counter - 1] = chunk_output_length;
+                    
+                    // Store chunk size as 4-byte header before the chunk data
+                    if (ciphertext_length + 4 + chunk_output_length <= max_ciphertext_size) {
+                        // Write chunk size as 4-byte little-endian integer
+                        ciphertext[ciphertext_length] = (chunk_output_length) & 0xFF;
+                        ciphertext[ciphertext_length + 1] = (chunk_output_length >> 8) & 0xFF;
+                        ciphertext[ciphertext_length + 2] = (chunk_output_length >> 16) & 0xFF;
+                        ciphertext[ciphertext_length + 3] = (chunk_output_length >> 24) & 0xFF;
+                        ciphertext_length += 4;
+                        
+                        // Copy chunk ciphertext
                         memcpy(ciphertext + ciphertext_length, chunk_ciphertext, chunk_output_length);
                         ciphertext_length += chunk_output_length;
                     } else {
                         fprintf(stderr, "Error: Ciphertext buffer overflow\n");
                         free(chunk_ciphertext);
                         free(ciphertext);
+                        free(chunk_sizes);
                         ciphertext = NULL;
                         break;
                     }
@@ -567,13 +608,15 @@ void run_benchmarks(TestConfig* config) {
                     free(chunk_ciphertext);
                 }
                 
+                free(chunk_sizes); // We don't need this anymore since sizes are stored in ciphertext
+                
                 printf("    Processed %zu chunks successfully\n", chunk_counter);
                 
-                double encrypt_end_time = get_time_ms();
+                uint64_t encrypt_end_time = get_time_ns();
                 resource_usage_t encrypt_end_usage = get_resource_usage();
                 encrypt_diff = resource_usage_diff(encrypt_start_usage, encrypt_end_usage);
                 
-                encrypt_time = encrypt_end_time - encrypt_start_time;
+                encrypt_time_ns = encrypt_end_time - encrypt_start_time;
                 
                 cleanup_chunked_file(cf);
             }
@@ -584,36 +627,136 @@ void run_benchmarks(TestConfig* config) {
                 continue;
             }
             
-            json_object_object_add(iter_obj, "encrypt_wall_time_ms", json_object_new_double(encrypt_time));
-            json_object_object_add(iter_obj, "encrypt_peak_rss_bytes", json_object_new_int64(encrypt_diff.peak_memory_bytes));
-            json_object_object_add(iter_obj, "encrypt_disk_read_bytes", json_object_new_int64(0)); // Not tracked directly
-            json_object_object_add(iter_obj, "encrypt_disk_write_bytes", json_object_new_int64(0)); // Not tracked directly
-            json_object_object_add(iter_obj, "encrypt_ctx_switches_voluntary", json_object_new_int64(encrypt_diff.voluntary_ctx_switches));
-            json_object_object_add(iter_obj, "encrypt_ctx_switches_involuntary", json_object_new_int64(encrypt_diff.involuntary_ctx_switches));
-            json_object_object_add(iter_obj, "encrypt_cpu_user_time_s", json_object_new_double(encrypt_diff.user_time_s));
-            json_object_object_add(iter_obj, "encrypt_cpu_system_time_s", json_object_new_double(encrypt_diff.system_time_s));
-            json_object_object_add(iter_obj, "output_size_bytes", json_object_new_int(ciphertext_length));
+            // Store encryption metrics
+            metrics.encrypt_time_ns = encrypt_time_ns;
+            metrics.encrypt_cpu_time_ns = encrypt_diff.cpu_time_ns;
+            metrics.encrypt_cpu_percent = encrypt_diff.cpu_percent;
+            metrics.encrypt_peak_memory_bytes = encrypt_diff.peak_memory_bytes;
+            metrics.encrypt_allocated_memory_bytes = encrypt_diff.allocated_memory_bytes;
+            metrics.input_size_bytes = data_size;
+            metrics.ciphertext_size_bytes = ciphertext_length;
             
-            total_encrypt_time += encrypt_time;
-            total_encrypt_memory += encrypt_diff.peak_memory_bytes;
+            // Add encryption metrics to iteration object
+            cJSON_AddNumberToObject(iter_obj, "encrypt_time_ns", (double)metrics.encrypt_time_ns);
+            cJSON_AddNumberToObject(iter_obj, "encrypt_cpu_time_ns", (double)metrics.encrypt_cpu_time_ns);
+            cJSON_AddNumberToObject(iter_obj, "encrypt_cpu_percent", metrics.encrypt_cpu_percent);
+            cJSON_AddNumberToObject(iter_obj, "encrypt_peak_memory_bytes", (double)metrics.encrypt_peak_memory_bytes);
+            cJSON_AddNumberToObject(iter_obj, "encrypt_allocated_memory_bytes", (double)metrics.encrypt_allocated_memory_bytes);
+            cJSON_AddNumberToObject(iter_obj, "encrypt_page_faults", (double)encrypt_diff.page_faults);
+            cJSON_AddNumberToObject(iter_obj, "encrypt_ctx_switches_voluntary", (double)encrypt_diff.voluntary_ctx_switches);
+            cJSON_AddNumberToObject(iter_obj, "encrypt_ctx_switches_involuntary", (double)encrypt_diff.involuntary_ctx_switches);
+            cJSON_AddNumberToObject(iter_obj, "input_size_bytes", (double)data_size);
+            cJSON_AddNumberToObject(iter_obj, "ciphertext_size_bytes", (double)ciphertext_length);
             
-            // Measure decryption
+            // Measure decryption with nanosecond precision
+            unsigned char* decrypted = NULL;
+            int plaintext_length = 0;
+            uint64_t decrypt_time_ns = 0;
+            resource_usage_t decrypt_diff = {0};
+            
             if (strategy == PROCESSING_MEMORY) {
                 printf("    Decrypting data (Memory mode)...\n");
+                uint64_t decrypt_start_time = get_time_ns();
+                resource_usage_t decrypt_start_usage = get_resource_usage();
+                
+                decrypted = impl->decrypt(ctx, ciphertext, ciphertext_length, key, &plaintext_length);
+                
+                uint64_t decrypt_end_time = get_time_ns();
+                resource_usage_t decrypt_end_usage = get_resource_usage();
+                decrypt_diff = resource_usage_diff(decrypt_start_usage, decrypt_end_usage);
+                decrypt_time_ns = decrypt_end_time - decrypt_start_time;
             } else {
+                // Stream processing - decrypt in chunks (reverse the encryption process)
                 printf("    Decrypting data (Stream mode)...\n");
-                printf("    Decrypting %d bytes of ciphertext...\n", ciphertext_length);
+                printf("    Decrypting %d bytes of ciphertext in chunks...\n", ciphertext_length);
+                
+                uint64_t decrypt_start_time = get_time_ns();
+                resource_usage_t decrypt_start_usage = get_resource_usage();
+                
+                // For stream decryption, we need to process the concatenated ciphertext in chunks
+                // Each chunk was encrypted separately with a 4-byte size header
+                
+                // Allocate buffer for decrypted data
+                size_t max_plaintext_size = config->dataset_size_bytes + 1024; // Add some extra space
+                decrypted = (unsigned char*)malloc(max_plaintext_size);
+                if (!decrypted) {
+                    fprintf(stderr, "Error: Failed to allocate memory for decrypted data\n");
+                    free(ciphertext);
+                    free(key);
+                    impl->cleanup(ctx);
+                    continue;
+                }
+                
+                plaintext_length = 0;
+                size_t ciphertext_offset = 0;
+                size_t chunk_counter = 0;
+                size_t total_chunks = (config->dataset_size_bytes + chunk_size - 1) / chunk_size;
+                
+                // Process each encrypted chunk using the stored size headers
+                while (ciphertext_offset + 4 < ciphertext_length && chunk_counter < total_chunks) {
+                    chunk_counter++;
+                    if (chunk_counter % 10 == 0 || chunk_counter == 1) {
+                        printf("    Decrypting chunk %zu/%zu (%.1f%%)...\n", 
+                               chunk_counter, total_chunks, 
+                               (chunk_counter * 100.0) / total_chunks);
+                    }
+                    
+                    // Read chunk size from 4-byte little-endian header
+                    size_t chunk_ciphertext_size = 
+                        (ciphertext[ciphertext_offset]) |
+                        (ciphertext[ciphertext_offset + 1] << 8) |
+                        (ciphertext[ciphertext_offset + 2] << 16) |
+                        (ciphertext[ciphertext_offset + 3] << 24);
+                    
+                    ciphertext_offset += 4; // Skip the size header
+                    
+                    // Validate chunk size
+                    if (chunk_ciphertext_size == 0 || ciphertext_offset + chunk_ciphertext_size > ciphertext_length) {
+                        fprintf(stderr, "Error: Invalid chunk size %zu at offset %zu\n", chunk_ciphertext_size, ciphertext_offset - 4);
+                        free(decrypted);
+                        decrypted = NULL;
+                        break;
+                    }
+                    
+                    int chunk_plaintext_length = 0;
+                    unsigned char* chunk_decrypted = impl->decrypt(ctx, 
+                        ciphertext + ciphertext_offset, 
+                        chunk_ciphertext_size, 
+                        key, 
+                        &chunk_plaintext_length);
+                    
+                    if (!chunk_decrypted) {
+                        fprintf(stderr, "Error: Chunk decryption failed at chunk %zu (size %zu)\n", chunk_counter, chunk_ciphertext_size);
+                        free(decrypted);
+                        decrypted = NULL;
+                        break;
+                    }
+                    
+                    // Copy chunk result to full plaintext buffer
+                    if (plaintext_length + chunk_plaintext_length <= max_plaintext_size) {
+                        memcpy(decrypted + plaintext_length, chunk_decrypted, chunk_plaintext_length);
+                        plaintext_length += chunk_plaintext_length;
+                        ciphertext_offset += chunk_ciphertext_size;
+                    } else {
+                        fprintf(stderr, "Error: Plaintext buffer overflow\n");
+                        free(chunk_decrypted);
+                        free(decrypted);
+                        decrypted = NULL;
+                        break;
+                    }
+                    
+                    free(chunk_decrypted);
+                }
+                
+                uint64_t decrypt_end_time = get_time_ns();
+                resource_usage_t decrypt_end_usage = get_resource_usage();
+                decrypt_diff = resource_usage_diff(decrypt_start_usage, decrypt_end_usage);
+                decrypt_time_ns = decrypt_end_time - decrypt_start_time;
+                
+                if (decrypted) {
+                    printf("    Decrypted %zu chunks successfully, total plaintext: %d bytes\n", chunk_counter, plaintext_length);
+                }
             }
-            
-            double decrypt_start_time = get_time_ms();
-            resource_usage_t decrypt_start_usage = get_resource_usage();
-            
-            int plaintext_length = 0;
-            unsigned char* decrypted = impl->decrypt(ctx, ciphertext, ciphertext_length, key, &plaintext_length);
-            
-            double decrypt_end_time = get_time_ms();
-            resource_usage_t decrypt_end_usage = get_resource_usage();
-            resource_usage_t decrypt_diff = resource_usage_diff(decrypt_start_usage, decrypt_end_usage);
             
             if (!decrypted) {
                 fprintf(stderr, "Error: Decryption failed\n");
@@ -623,19 +766,26 @@ void run_benchmarks(TestConfig* config) {
                 continue;
             }
             
-            double decrypt_time = decrypt_end_time - decrypt_start_time;
+
             
-            // Add decryption metrics to iteration object directly
-            json_object_object_add(iter_obj, "decrypt_wall_time_ms", json_object_new_double(decrypt_time));
-            json_object_object_add(iter_obj, "decrypt_peak_rss_bytes", json_object_new_int64(decrypt_diff.peak_memory_bytes));
-            // Add CPU metrics that Python tracks
-            json_object_object_add(iter_obj, "decrypt_cpu_user_time_s", json_object_new_double(decrypt_diff.user_time_s));
-            json_object_object_add(iter_obj, "decrypt_cpu_system_time_s", json_object_new_double(decrypt_diff.system_time_s));
-            json_object_object_add(iter_obj, "decrypt_ctx_switches_voluntary", json_object_new_int64(decrypt_diff.voluntary_ctx_switches));
-            json_object_object_add(iter_obj, "decrypt_ctx_switches_involuntary", json_object_new_int64(decrypt_diff.involuntary_ctx_switches));
-            json_object_object_add(iter_obj, "decrypt_disk_read_bytes", json_object_new_int64(0)); // Not tracked directly
-            json_object_object_add(iter_obj, "decrypt_disk_write_bytes", json_object_new_int64(0)); // Not tracked directly
-            json_object_object_add(iter_obj, "ciphertext_total_bytes", json_object_new_int(ciphertext_length));
+            // Store decryption metrics
+            metrics.decrypt_time_ns = decrypt_time_ns;
+            metrics.decrypt_cpu_time_ns = decrypt_diff.cpu_time_ns;
+            metrics.decrypt_cpu_percent = decrypt_diff.cpu_percent;
+            metrics.decrypt_peak_memory_bytes = decrypt_diff.peak_memory_bytes;
+            metrics.decrypt_allocated_memory_bytes = decrypt_diff.allocated_memory_bytes;
+            metrics.decrypted_size_bytes = plaintext_length;
+            
+            // Add decryption metrics to iteration object
+            cJSON_AddNumberToObject(iter_obj, "decrypt_time_ns", (double)metrics.decrypt_time_ns);
+            cJSON_AddNumberToObject(iter_obj, "decrypt_cpu_time_ns", (double)metrics.decrypt_cpu_time_ns);
+            cJSON_AddNumberToObject(iter_obj, "decrypt_cpu_percent", metrics.decrypt_cpu_percent);
+            cJSON_AddNumberToObject(iter_obj, "decrypt_peak_memory_bytes", (double)metrics.decrypt_peak_memory_bytes);
+            cJSON_AddNumberToObject(iter_obj, "decrypt_allocated_memory_bytes", (double)metrics.decrypt_allocated_memory_bytes);
+            cJSON_AddNumberToObject(iter_obj, "decrypt_page_faults", (double)decrypt_diff.page_faults);
+            cJSON_AddNumberToObject(iter_obj, "decrypt_ctx_switches_voluntary", (double)decrypt_diff.voluntary_ctx_switches);
+            cJSON_AddNumberToObject(iter_obj, "decrypt_ctx_switches_involuntary", (double)decrypt_diff.involuntary_ctx_switches);
+            cJSON_AddNumberToObject(iter_obj, "decrypted_size_bytes", (double)plaintext_length);
             
             // Check correctness (if decryption result matches original data)
             int is_correct = 0;
@@ -648,63 +798,66 @@ void run_benchmarks(TestConfig* config) {
                     // Since we don't have the full data in memory for comparison,
                     // we'll just check if the decrypted length is close to expected
                     // Allow for small variations in length (e.g., due to nonce/IV/padding)
-                    size_t length_difference = plaintext_length > config->dataset_size ? 
-                        plaintext_length - config->dataset_size : 
-                        config->dataset_size - plaintext_length;
+                    size_t length_difference = plaintext_length > config->dataset_size_bytes ? 
+                        plaintext_length - config->dataset_size_bytes : 
+                        config->dataset_size_bytes - plaintext_length;
                     
                     // Calculate tolerance based on dataset size (0.02% of dataset size or at least 32 bytes)
-                    size_t tolerance = config->dataset_size / 5000;
+                    size_t tolerance = config->dataset_size_bytes / 5000;
                     if (tolerance < 32) tolerance = 32;
                     
                     // Print the tolerance for debugging
                     if (length_difference <= tolerance) {
                         printf("    Verification (Stream mode): Length check passed (diff %zu/%zu bytes, within %.3f%% tolerance), full data verification skipped\n", 
-                               length_difference, tolerance, (double)length_difference / config->dataset_size * 100.0);
+                               length_difference, tolerance, (double)length_difference / config->dataset_size_bytes * 100.0);
                         // In stream mode, we consider it correct if lengths are close enough
                         is_correct = 1;
                     } else {
                         printf("    Verification (Stream mode): FAILED - Length mismatch (got %d, expected %zu, diff %zu bytes/%.3f%%)\n", 
-                               plaintext_length, config->dataset_size, length_difference, 
-                               (double)length_difference / config->dataset_size * 100.0);
-                correctness_failures++;
+                               plaintext_length, config->dataset_size_bytes, length_difference, 
+                               (double)length_difference / config->dataset_size_bytes * 100.0);
                     }
                 } else if (plaintext_length != data_size) {
                     printf("    Verification: FAILED - Length mismatch (got %d, expected %zu)\n", 
                            plaintext_length, data_size);
-                    correctness_failures++;
                 } else {
                     printf("    Verification: FAILED - Content mismatch\n");
-                    correctness_failures++;
                 }
             }
             
-            json_object_object_add(iter_obj, "correctness_passed", json_object_new_boolean(is_correct));
+            metrics.correctness_passed = is_correct;
+            cJSON_AddBoolToObject(iter_obj, "correctness_passed", is_correct);
             
-            // Calculate throughput
-            double encrypt_throughput_bps = 0;
-            double decrypt_throughput_bps = 0;
-            
-            if (encrypt_time > 0) {
-                encrypt_throughput_bps = (data_size * 8) / (encrypt_time / 1000.0);
+            // Add operation-specific details if available
+            if (impl->algo_type == ALGO_AES || impl->algo_type == ALGO_CAMELLIA) {
+                // For block ciphers, add block size and IV size
+                int block_size = 16; // Default for AES/Camellia
+                metrics.block_size_bytes = block_size;
+                cJSON_AddNumberToObject(iter_obj, "block_size_bytes", block_size);
+                
+                // IV size depends on mode, typically 16 bytes for CBC/GCM
+                int iv_size = 16;
+                metrics.iv_size_bytes = iv_size;
+                cJSON_AddNumberToObject(iter_obj, "iv_size_bytes", iv_size);
+                
+                // Add number of rounds if known
+                int rounds = (impl->algo_type == ALGO_AES) ? 
+                    (impl->key_size == 128 ? 10 : (impl->key_size == 192 ? 12 : 14)) : 
+                    (impl->key_size == 128 ? 18 : 24); // Camellia
+                metrics.num_rounds = rounds;
+                cJSON_AddNumberToObject(iter_obj, "num_rounds", rounds);
+            } else if (impl->algo_type == ALGO_CHACHA20) {
+                // ChaCha20 specific
+                metrics.num_rounds = 20; // ChaCha20 has 20 rounds
+                cJSON_AddNumberToObject(iter_obj, "num_rounds", 20);
             }
             
-            if (decrypt_time > 0) {
-                decrypt_throughput_bps = (data_size * 8) / (decrypt_time / 1000.0);
-            }
-            
-            json_object_object_add(iter_obj, "encrypt_throughput_bps", json_object_new_double(encrypt_throughput_bps));
-            json_object_object_add(iter_obj, "decrypt_throughput_bps", json_object_new_double(decrypt_throughput_bps));
-            
-            total_encrypt_throughput += encrypt_throughput_bps;
-            total_decrypt_throughput += decrypt_throughput_bps;
-            total_ciphertext_size += ciphertext_length;
+            // Add implementation details
+            cJSON_AddBoolToObject(iter_obj, "is_custom_implementation", impl->is_custom);
+            cJSON_AddStringToObject(iter_obj, "library_version", impl->is_custom ? "custom" : "OpenSSL");
             
             // Add iteration to array
-            json_object_array_add(iterations_array, iter_obj);
-            
-            // Update totals for averaging
-            total_decrypt_time += decrypt_time;
-            total_decrypt_memory += decrypt_diff.peak_memory_bytes;
+            cJSON_AddItemToArray(iterations_array, iter_obj);
             
             // Clean up
             free(decrypted);
@@ -719,237 +872,255 @@ void run_benchmarks(TestConfig* config) {
         printf("  Benchmark completed for %s\n", description);
         
         // Calculate averages
-        int actual_iterations = json_object_array_length(iterations_array);
+        int actual_iterations = cJSON_GetArraySize(iterations_array);
         if (actual_iterations > 0) {
-            double avg_keygen_time = total_keygen_time / actual_iterations;
-            double avg_encrypt_time = total_encrypt_time / actual_iterations;
-            double avg_decrypt_time = total_decrypt_time / actual_iterations;
+            // Variables for storing totals
+            uint64_t total_keygen_time_ns = 0;
+            uint64_t total_encrypt_time_ns = 0;
+            uint64_t total_decrypt_time_ns = 0;
+            uint64_t total_keygen_cpu_time_ns = 0;
+            uint64_t total_encrypt_cpu_time_ns = 0;
+            uint64_t total_decrypt_cpu_time_ns = 0;
+            double total_keygen_cpu_percent = 0;
+            double total_encrypt_cpu_percent = 0;
+            double total_decrypt_cpu_percent = 0;
+            size_t total_keygen_memory = 0;
+            size_t total_encrypt_memory = 0;
+            size_t total_decrypt_memory = 0;
+            size_t total_key_size_bytes = 0;
+            size_t total_ciphertext_size = 0;
+            int total_num_keys = 0;
+            int correctness_failures = 0;
+            
+            // Loop through iterations to collect totals
+            for (int i = 0; i < actual_iterations; i++) {
+                cJSON* iter = cJSON_GetArrayItem(iterations_array, i);
+                if (!iter) continue;
+                
+                // Extract key metrics
+                cJSON* value;
+                
+                // Key generation time
+                value = cJSON_GetObjectItem(iter, "keygen_time_ns");
+                if (value && cJSON_IsNumber(value))
+                    total_keygen_time_ns += (uint64_t)value->valuedouble;
+                
+                // Encryption time
+                value = cJSON_GetObjectItem(iter, "encrypt_time_ns");
+                if (value && cJSON_IsNumber(value))
+                    total_encrypt_time_ns += (uint64_t)value->valuedouble;
+                
+                // Decryption time
+                value = cJSON_GetObjectItem(iter, "decrypt_time_ns");
+                if (value && cJSON_IsNumber(value))
+                    total_decrypt_time_ns += (uint64_t)value->valuedouble;
+                
+                // CPU times
+                value = cJSON_GetObjectItem(iter, "keygen_cpu_time_ns");
+                if (value && cJSON_IsNumber(value))
+                    total_keygen_cpu_time_ns += (uint64_t)value->valuedouble;
+                
+                value = cJSON_GetObjectItem(iter, "encrypt_cpu_time_ns");
+                if (value && cJSON_IsNumber(value))
+                    total_encrypt_cpu_time_ns += (uint64_t)value->valuedouble;
+                
+                value = cJSON_GetObjectItem(iter, "decrypt_cpu_time_ns");
+                if (value && cJSON_IsNumber(value))
+                    total_decrypt_cpu_time_ns += (uint64_t)value->valuedouble;
+                
+                // CPU percentages
+                value = cJSON_GetObjectItem(iter, "keygen_cpu_percent");
+                if (value && cJSON_IsNumber(value))
+                    total_keygen_cpu_percent += value->valuedouble;
+                
+                value = cJSON_GetObjectItem(iter, "encrypt_cpu_percent");
+                if (value && cJSON_IsNumber(value))
+                    total_encrypt_cpu_percent += value->valuedouble;
+                
+                value = cJSON_GetObjectItem(iter, "decrypt_cpu_percent");
+                if (value && cJSON_IsNumber(value))
+                    total_decrypt_cpu_percent += value->valuedouble;
+                
+                // Memory usage
+                value = cJSON_GetObjectItem(iter, "keygen_peak_memory_bytes");
+                if (value && cJSON_IsNumber(value))
+                    total_keygen_memory += (size_t)value->valuedouble;
+                
+                value = cJSON_GetObjectItem(iter, "encrypt_peak_memory_bytes");
+                if (value && cJSON_IsNumber(value))
+                    total_encrypt_memory += (size_t)value->valuedouble;
+                
+                value = cJSON_GetObjectItem(iter, "decrypt_peak_memory_bytes");
+                if (value && cJSON_IsNumber(value))
+                    total_decrypt_memory += (size_t)value->valuedouble;
+                
+                // Data metrics
+                value = cJSON_GetObjectItem(iter, "key_size_bytes");
+                if (value && cJSON_IsNumber(value)) {
+                    total_key_size_bytes += (size_t)value->valuedouble;
+                    total_num_keys++;
+                }
+                
+                value = cJSON_GetObjectItem(iter, "ciphertext_size_bytes");
+                if (value && cJSON_IsNumber(value))
+                    total_ciphertext_size += (size_t)value->valuedouble;
+                
+                // Correctness
+                value = cJSON_GetObjectItem(iter, "correctness_passed");
+                if (value && !cJSON_IsTrue(value))
+                    correctness_failures++;
+            }
+            
+            // Calculate averages
+            double avg_keygen_time_ns = (double)total_keygen_time_ns / actual_iterations;
+            double avg_encrypt_time_ns = (double)total_encrypt_time_ns / actual_iterations;
+            double avg_decrypt_time_ns = (double)total_decrypt_time_ns / actual_iterations;
+            double avg_keygen_cpu_time_ns = (double)total_keygen_cpu_time_ns / actual_iterations;
+            double avg_encrypt_cpu_time_ns = (double)total_encrypt_cpu_time_ns / actual_iterations;
+            double avg_decrypt_cpu_time_ns = (double)total_decrypt_cpu_time_ns / actual_iterations;
+            double avg_keygen_cpu_percent = total_keygen_cpu_percent / actual_iterations;
+            double avg_encrypt_cpu_percent = total_encrypt_cpu_percent / actual_iterations;
+            double avg_decrypt_cpu_percent = total_decrypt_cpu_percent / actual_iterations;
             size_t avg_keygen_memory = total_keygen_memory / actual_iterations;
             size_t avg_encrypt_memory = total_encrypt_memory / actual_iterations;
             size_t avg_decrypt_memory = total_decrypt_memory / actual_iterations;
-            double avg_encrypt_throughput = total_encrypt_throughput / actual_iterations;
-            double avg_decrypt_throughput = total_decrypt_throughput / actual_iterations;
-            size_t avg_ciphertext_size = total_ciphertext_size / actual_iterations;
-            
-            // Calculate averages for CPU metrics
-            double avg_keygen_cpu_user_time = 0;
-            double avg_keygen_cpu_system_time = 0;
-            double avg_encrypt_cpu_user_time = 0;
-            double avg_encrypt_cpu_system_time = 0;
-            double avg_decrypt_cpu_user_time = 0;
-            double avg_decrypt_cpu_system_time = 0;
-            
-            // Context switches
-            double avg_keygen_ctx_voluntary = 0;
-            double avg_keygen_ctx_involuntary = 0;
-            double avg_encrypt_ctx_voluntary = 0;
-            double avg_encrypt_ctx_involuntary = 0;
-            double avg_decrypt_ctx_voluntary = 0;
-            double avg_decrypt_ctx_involuntary = 0;
-            
-            // Key metrics
-            size_t total_key_size_bytes = 0;
-            int total_num_keys = 0;
-            double avg_key_size_bytes = 0;
-            double avg_num_keys = 0;
-            
-            // Loop through iterations to get metrics
-            for (int i = 0; i < actual_iterations; i++) {
-                struct json_object* iter = json_object_array_get_idx(iterations_array, i);
-                if (!iter) continue;
-                
-                // Extract CPU metrics
-                struct json_object* value;
-                
-                if (json_object_object_get_ex(iter, "keygen_cpu_user_time_s", &value))
-                    avg_keygen_cpu_user_time += json_object_get_double(value);
-                    
-                if (json_object_object_get_ex(iter, "keygen_cpu_system_time_s", &value))
-                    avg_keygen_cpu_system_time += json_object_get_double(value);
-                    
-                if (json_object_object_get_ex(iter, "encrypt_cpu_user_time_s", &value))
-                    avg_encrypt_cpu_user_time += json_object_get_double(value);
-                    
-                if (json_object_object_get_ex(iter, "encrypt_cpu_system_time_s", &value))
-                    avg_encrypt_cpu_system_time += json_object_get_double(value);
-                    
-                if (json_object_object_get_ex(iter, "decrypt_cpu_user_time_s", &value))
-                    avg_decrypt_cpu_user_time += json_object_get_double(value);
-                    
-                if (json_object_object_get_ex(iter, "decrypt_cpu_system_time_s", &value))
-                    avg_decrypt_cpu_system_time += json_object_get_double(value);
-                    
-                // Extract context switches (including keygen now)
-                if (json_object_object_get_ex(iter, "keygen_ctx_switches_voluntary", &value))
-                    avg_keygen_ctx_voluntary += json_object_get_int64(value);
-                    
-                if (json_object_object_get_ex(iter, "keygen_ctx_switches_involuntary", &value))
-                    avg_keygen_ctx_involuntary += json_object_get_int64(value);
-                    
-                if (json_object_object_get_ex(iter, "encrypt_ctx_switches_voluntary", &value))
-                    avg_encrypt_ctx_voluntary += json_object_get_int64(value);
-                    
-                if (json_object_object_get_ex(iter, "encrypt_ctx_switches_involuntary", &value))
-                    avg_encrypt_ctx_involuntary += json_object_get_int64(value);
-                    
-                if (json_object_object_get_ex(iter, "decrypt_ctx_switches_voluntary", &value))
-                    avg_decrypt_ctx_voluntary += json_object_get_int64(value);
-                    
-                if (json_object_object_get_ex(iter, "decrypt_ctx_switches_involuntary", &value))
-                    avg_decrypt_ctx_involuntary += json_object_get_int64(value);
-                
-                // Extract key metrics
-                if (json_object_object_get_ex(iter, "key_size_bytes", &value)) {
-                    size_t key_size = json_object_get_int(value);
-                    total_key_size_bytes += key_size;
-                    avg_key_size_bytes += key_size;
-                }
-                
-                if (json_object_object_get_ex(iter, "num_keys", &value)) {
-                    int num_keys = json_object_get_int(value);
-                    total_num_keys += num_keys;
-                    avg_num_keys += num_keys;
-                }
-            }
-            
-            // Calculate final averages
-            avg_keygen_cpu_user_time /= actual_iterations;
-            avg_keygen_cpu_system_time /= actual_iterations;
-            avg_encrypt_cpu_user_time /= actual_iterations;
-            avg_encrypt_cpu_system_time /= actual_iterations;
-            avg_decrypt_cpu_user_time /= actual_iterations;
-            avg_decrypt_cpu_system_time /= actual_iterations;
-            
-            avg_keygen_ctx_voluntary /= actual_iterations;
-            avg_keygen_ctx_involuntary /= actual_iterations;
-            avg_encrypt_ctx_voluntary /= actual_iterations;
-            avg_encrypt_ctx_involuntary /= actual_iterations;
-            avg_decrypt_ctx_voluntary /= actual_iterations;
-            avg_decrypt_ctx_involuntary /= actual_iterations;
-            
-            // Calculate key metric averages
-            avg_key_size_bytes /= actual_iterations;
-            avg_num_keys /= actual_iterations;
             
             // Create aggregated metrics object
-            struct json_object* aggregated_metrics = json_object_new_object();
-            json_object_object_add(aggregated_metrics, "iterations_completed", json_object_new_int(actual_iterations));
-            json_object_object_add(aggregated_metrics, "all_correctness_checks_passed", 
-                                 json_object_new_boolean(correctness_failures == 0));
+            cJSON* aggregated_metrics = cJSON_CreateObject();
             
-            // Key generation metrics
-            json_object_object_add(aggregated_metrics, "avg_keygen_wall_time_ms", json_object_new_double(avg_keygen_time));
-            json_object_object_add(aggregated_metrics, "avg_keygen_cpu_total_time_s", 
-                                 json_object_new_double(avg_keygen_cpu_user_time + avg_keygen_cpu_system_time));
-            json_object_object_add(aggregated_metrics, "avg_keygen_peak_rss_mb", 
-                                 json_object_new_double(avg_keygen_memory / (1024.0 * 1024.0)));
-            json_object_object_add(aggregated_metrics, "avg_keygen_ctx_switches_total", 
-                                 json_object_new_double(avg_keygen_ctx_voluntary + avg_keygen_ctx_involuntary));
-            json_object_object_add(aggregated_metrics, "avg_key_size_bytes", 
-                                json_object_new_double(avg_key_size_bytes));
-            json_object_object_add(aggregated_metrics, "avg_num_keys", 
-                                json_object_new_double(avg_num_keys));
+            // Add basic information
+            cJSON_AddNumberToObject(aggregated_metrics, "iterations_completed", actual_iterations);
+            cJSON_AddBoolToObject(aggregated_metrics, "all_correctness_checks_passed", correctness_failures == 0);
             
-            // Encryption metrics
-            json_object_object_add(aggregated_metrics, "avg_encrypt_wall_time_ms", json_object_new_double(avg_encrypt_time));
-            json_object_object_add(aggregated_metrics, "avg_encrypt_cpu_total_time_s", 
-                                 json_object_new_double(avg_encrypt_cpu_user_time + avg_encrypt_cpu_system_time));
+            // Add timing metrics (in nanoseconds and seconds for compatibility)
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_keygen_time_ns", avg_keygen_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_encrypt_time_ns", avg_encrypt_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_decrypt_time_ns", avg_decrypt_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_keygen_time_s", avg_keygen_time_ns / 1e9);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_encrypt_time_s", avg_encrypt_time_ns / 1e9);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_decrypt_time_s", avg_decrypt_time_ns / 1e9);
             
-            // Calculate CPU percentage
-            double encrypt_cpu_percentage = 100.0; // Default to 100%
-            if (avg_encrypt_time > 0) {
-                double encrypt_cpu_total_time = avg_encrypt_cpu_user_time + avg_encrypt_cpu_system_time;
-                encrypt_cpu_percentage = (encrypt_cpu_total_time / (avg_encrypt_time / 1000.0)) * 100.0;
+            // Add CPU metrics
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_keygen_cpu_time_ns", avg_keygen_cpu_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_encrypt_cpu_time_ns", avg_encrypt_cpu_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_decrypt_cpu_time_ns", avg_decrypt_cpu_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_keygen_cpu_percent", avg_keygen_cpu_percent);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_encrypt_cpu_percent", avg_encrypt_cpu_percent);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_decrypt_cpu_percent", avg_decrypt_cpu_percent);
+            
+            // Add memory metrics
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_keygen_peak_memory_bytes", (double)avg_keygen_memory);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_encrypt_peak_memory_bytes", (double)avg_encrypt_memory);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_decrypt_peak_memory_bytes", (double)avg_decrypt_memory);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_keygen_peak_memory_mb", avg_keygen_memory / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_encrypt_peak_memory_mb", avg_encrypt_memory / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_decrypt_peak_memory_mb", avg_decrypt_memory / (1024.0 * 1024.0));
+            
+            // Add data metrics
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_key_size_bytes", (double)total_key_size_bytes / total_num_keys);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_ciphertext_size_bytes", (double)total_ciphertext_size / actual_iterations);
+            
+            // Add operational metrics from the first iteration
+            // (assuming these are constant across iterations)
+            if (actual_iterations > 0) {
+                cJSON* first_iter = cJSON_GetArrayItem(iterations_array, 0);
+                if (first_iter) {
+                    cJSON* value; // Define value variable for this scope
+                    
+                    // Thread count
+                    value = cJSON_GetObjectItem(first_iter, "thread_count");
+                    if (value && cJSON_IsNumber(value))
+                        cJSON_AddNumberToObject(aggregated_metrics, "thread_count", value->valueint);
+                    
+                    // Process priority
+                    value = cJSON_GetObjectItem(first_iter, "process_priority");
+                    if (value && cJSON_IsNumber(value))
+                        cJSON_AddNumberToObject(aggregated_metrics, "process_priority", value->valueint);
+                    
+                    // Block size
+                    value = cJSON_GetObjectItem(first_iter, "block_size_bytes");
+                    if (value && cJSON_IsNumber(value))
+                        cJSON_AddNumberToObject(aggregated_metrics, "block_size_bytes", value->valueint);
+                    
+                    // IV size
+                    value = cJSON_GetObjectItem(first_iter, "iv_size_bytes");
+                    if (value && cJSON_IsNumber(value))
+                        cJSON_AddNumberToObject(aggregated_metrics, "iv_size_bytes", value->valueint);
+                    
+                    // Number of rounds
+                    value = cJSON_GetObjectItem(first_iter, "num_rounds");
+                    if (value && cJSON_IsNumber(value))
+                        cJSON_AddNumberToObject(aggregated_metrics, "num_rounds", value->valueint);
+                    
+                    // Custom implementation flag
+                    value = cJSON_GetObjectItem(first_iter, "is_custom_implementation");
+                    if (value && cJSON_IsBool(value))
+                        cJSON_AddBoolToObject(aggregated_metrics, "is_custom_implementation", cJSON_IsTrue(value));
+                    
+                    // Library version
+                    value = cJSON_GetObjectItem(first_iter, "library_version");
+                    if (value && cJSON_IsString(value))
+                        cJSON_AddStringToObject(aggregated_metrics, "library_version", value->valuestring);
+                }
             }
-            json_object_object_add(aggregated_metrics, "avg_encrypt_cpu_percentage", json_object_new_double(encrypt_cpu_percentage));
             
-            json_object_object_add(aggregated_metrics, "avg_encrypt_peak_rss_mb", 
-                                 json_object_new_double(avg_encrypt_memory / (1024.0 * 1024.0)));
-            json_object_object_add(aggregated_metrics, "avg_encrypt_ctx_switches_total", 
-                                 json_object_new_double(avg_encrypt_ctx_voluntary + avg_encrypt_ctx_involuntary));
+            // Add throughput metrics
+            double encrypt_throughput_bps = (config->dataset_size_bytes * 8.0) / (avg_encrypt_time_ns / 1e9);
+            double decrypt_throughput_bps = (config->dataset_size_bytes * 8.0) / (avg_decrypt_time_ns / 1e9);
+            double encrypt_mbps = (config->dataset_size_bytes / (1024.0 * 1024.0)) / (avg_encrypt_time_ns / 1e9);
+            double decrypt_mbps = (config->dataset_size_bytes / (1024.0 * 1024.0)) / (avg_decrypt_time_ns / 1e9);
             
-            // Decryption metrics
-            json_object_object_add(aggregated_metrics, "avg_decrypt_wall_time_ms", json_object_new_double(avg_decrypt_time));
-            json_object_object_add(aggregated_metrics, "avg_decrypt_cpu_total_time_s", 
-                                 json_object_new_double(avg_decrypt_cpu_user_time + avg_decrypt_cpu_system_time));
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_encrypt_throughput_bps", encrypt_throughput_bps);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_decrypt_throughput_bps", decrypt_throughput_bps);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_throughput_encrypt_mb_per_s", encrypt_mbps);
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_throughput_decrypt_mb_per_s", decrypt_mbps);
             
-            // Calculate CPU percentage
-            double decrypt_cpu_percentage = 100.0; // Default to 100%
-            if (avg_decrypt_time > 0) {
-                double decrypt_cpu_total_time = avg_decrypt_cpu_user_time + avg_decrypt_cpu_system_time;
-                decrypt_cpu_percentage = (decrypt_cpu_total_time / (avg_decrypt_time / 1000.0)) * 100.0;
-            }
-            json_object_object_add(aggregated_metrics, "avg_decrypt_cpu_percentage", json_object_new_double(decrypt_cpu_percentage));
-            
-            json_object_object_add(aggregated_metrics, "avg_decrypt_peak_rss_mb", 
-                                 json_object_new_double(avg_decrypt_memory / (1024.0 * 1024.0)));
-            json_object_object_add(aggregated_metrics, "avg_decrypt_ctx_switches_total", 
-                                 json_object_new_double(avg_decrypt_ctx_voluntary + avg_decrypt_ctx_involuntary));
-            
-            // File and throughput metrics
-            json_object_object_add(aggregated_metrics, "avg_ciphertext_total_bytes", json_object_new_double(avg_ciphertext_size));
-            
-            // Calculate overhead percentage
+            // Add overhead metrics
             double overhead_percent = 0;
-            if (config->dataset_size > 0 && avg_ciphertext_size > 0) {
-                overhead_percent = ((avg_ciphertext_size - config->dataset_size) / (double)config->dataset_size) * 100.0;
+            if (config->dataset_size_bytes > 0 && total_ciphertext_size > 0) {
+                overhead_percent = ((total_ciphertext_size - config->dataset_size_bytes) / (double)config->dataset_size_bytes) * 100.0;
             }
-            json_object_object_add(aggregated_metrics, "avg_ciphertext_overhead_percent", json_object_new_double(overhead_percent));
-            
-            // Calculate MB/s throughput instead of bit/s
-            double encrypt_mbps = (config->dataset_size / (1024.0 * 1024.0)) / (avg_encrypt_time / 1000.0);
-            double decrypt_mbps = (config->dataset_size / (1024.0 * 1024.0)) / (avg_decrypt_time / 1000.0);
-            
-            json_object_object_add(aggregated_metrics, "avg_throughput_encrypt_mb_per_s", json_object_new_double(encrypt_mbps));
-            json_object_object_add(aggregated_metrics, "avg_throughput_decrypt_mb_per_s", json_object_new_double(decrypt_mbps));
-            
-            // Add time in seconds
-            json_object_object_add(aggregated_metrics, "encryption_time_seconds", json_object_new_double(avg_encrypt_time / 1000.0));
-            json_object_object_add(aggregated_metrics, "decryption_time_seconds", json_object_new_double(avg_decrypt_time / 1000.0));
-            
-            // Add c-specific simple metrics that Python doesn't have
-            json_object_object_add(aggregated_metrics, "avg_encrypt_throughput_bps", json_object_new_double(avg_encrypt_throughput));
-            json_object_object_add(aggregated_metrics, "avg_decrypt_throughput_bps", json_object_new_double(avg_decrypt_throughput));
-            json_object_object_add(aggregated_metrics, "correctness_failures", json_object_new_int(correctness_failures));
+            cJSON_AddNumberToObject(aggregated_metrics, "avg_ciphertext_overhead_percent", overhead_percent);
             
             // Add total metrics
-            json_object_object_add(aggregated_metrics, "total_keygen_time_ms", json_object_new_double(total_keygen_time));
-            json_object_object_add(aggregated_metrics, "total_encrypt_time_ms", json_object_new_double(total_encrypt_time));
-            json_object_object_add(aggregated_metrics, "total_decrypt_time_ms", json_object_new_double(total_decrypt_time));
-            json_object_object_add(aggregated_metrics, "total_num_keys", json_object_new_int(total_num_keys));
-            json_object_object_add(aggregated_metrics, "total_key_size_bytes", json_object_new_int64(total_key_size_bytes));
+            cJSON_AddNumberToObject(aggregated_metrics, "total_keygen_time_ns", (double)total_keygen_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "total_encrypt_time_ns", (double)total_encrypt_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "total_decrypt_time_ns", (double)total_decrypt_time_ns);
+            cJSON_AddNumberToObject(aggregated_metrics, "total_num_keys", total_num_keys);
+            cJSON_AddNumberToObject(aggregated_metrics, "total_key_size_bytes", (double)total_key_size_bytes);
+            cJSON_AddNumberToObject(aggregated_metrics, "correctness_failures", correctness_failures);
             
             // Add iterations and aggregated metrics to the implementation object
-            json_object_object_add(impl_obj, "iterations", iterations_array);
-            json_object_object_add(impl_obj, "aggregated_metrics", aggregated_metrics);
+            cJSON_AddItemToObject(impl_obj, "iterations", iterations_array);
+            cJSON_AddItemToObject(impl_obj, "aggregated_metrics", aggregated_metrics);
             
             // Add configuration
-            struct json_object* config_obj = json_object_new_object();
-            json_object_object_add(config_obj, "enabled", json_object_new_boolean(1));
+            cJSON* config_obj = cJSON_CreateObject();
+            cJSON_AddBoolToObject(config_obj, "enabled", 1);
             
             // Convert key_size to string
             char key_size_str[16];
             snprintf(key_size_str, sizeof(key_size_str), "%d", impl->key_size);
-            json_object_object_add(config_obj, "key_size", json_object_new_string(key_size_str));
+            cJSON_AddStringToObject(config_obj, "key_size", key_size_str);
             
-            json_object_object_add(config_obj, "mode", json_object_new_string(impl->mode));
-            json_object_object_add(config_obj, "is_custom", json_object_new_boolean(impl->is_custom));
-            json_object_object_add(impl_obj, "configuration", config_obj);
+            cJSON_AddStringToObject(config_obj, "mode", impl->mode);
+            cJSON_AddBoolToObject(config_obj, "is_custom", impl->is_custom);
+            cJSON_AddItemToObject(impl_obj, "configuration", config_obj);
             
             // Add implementation type and description
-            json_object_object_add(impl_obj, "implementation_type", 
-                                 json_object_new_string(impl->is_custom ? "custom" : "stdlib"));
+            cJSON_AddStringToObject(impl_obj, "implementation_type", 
+                                  impl->is_custom ? "custom" : "stdlib");
                                  
             char description[128];
             snprintf(description, sizeof(description), "%s %s Implementation", 
                    impl->is_custom ? "Custom" : "Standard", getAlgorithmName(impl->algo_type));
-            json_object_object_add(impl_obj, "description", json_object_new_string(description));
+            cJSON_AddStringToObject(impl_obj, "description", description);
             
             // Add implementation to encryption_results using the name as the key
-            json_object_object_add(encryption_results_obj, impl->name, impl_obj);
+            cJSON_AddItemToObject(encryption_results_obj, impl->name, impl_obj);
         } else {
-            json_object_put(impl_obj);
-            json_object_put(iterations_array);
+            cJSON_Delete(impl_obj);
+            cJSON_Delete(iterations_array);
         }
         
         // No need to clean up anything here - cleanup happens in each iteration
@@ -961,35 +1132,35 @@ void run_benchmarks(TestConfig* config) {
     }
     
     // Add encryption_results to results
-    json_object_object_add(results_obj, "encryption_results", encryption_results_obj);
+    cJSON_AddItemToObject(results_obj, "encryption_results", encryption_results_obj);
     
     // Create results file
-    if (!create_directory(config->results_dir)) {
-        fprintf(stderr, "Error: Could not create results directory: %s\n", config->results_dir);
-        json_object_put(results_obj);
+    if (!create_directory(config->session_dir)) {
+        fprintf(stderr, "Error: Could not create results directory: %s\n", config->session_dir);
+        cJSON_Delete(results_obj);
         return;
     }
     
     char results_path[MAX_PATH_LENGTH];
-    snprintf(results_path, sizeof(results_path), "%s/c_results.json", config->results_dir);
+    snprintf(results_path, sizeof(results_path), "%s/results/c_results.json", config->session_dir);
     
     // Write results to file
     FILE* results_file = fopen(results_path, "w");
     if (!results_file) {
         fprintf(stderr, "Error: Could not open results file for writing: %s\n", results_path);
-        json_object_put(results_obj);
+        cJSON_Delete(results_obj);
         return;
     }
     
     // Write formatted JSON to file
-    const char* json_string = json_object_to_json_string_ext(results_obj, JSON_C_TO_STRING_PRETTY);
+    const char* json_string = cJSON_Print(results_obj);
     fputs(json_string, results_file);
         fclose(results_file);
         
     printf("Results saved to: %s\n", results_path);
     
     // Cleanup
-    json_object_put(results_obj);
+    cJSON_Delete(results_obj);
 }
 
 // Helper function to get current time as a string
@@ -1017,22 +1188,7 @@ const char* getAlgorithmName(algorithm_type_t type) {
     }
 }
 
-/**
- * Debug function to print ECC configuration from environment variables
- */
-void debug_ecc_config() {
-    char* curve_str = getenv("ECC_CURVE");
-    char* ecc_enabled_str = getenv("ECC_ENABLED");
-    char* use_stdlib_str = getenv("USE_STDLIB");
-    char* use_custom_str = getenv("USE_CUSTOM");
-    
-    printf("=== ECC Debug Information ===\n");
-    printf("ECC_CURVE env var: %s\n", curve_str ? curve_str : "Not set");
-    printf("ECC_ENABLED env var: %s\n", ecc_enabled_str ? ecc_enabled_str : "Not set");
-    printf("USE_STDLIB env var: %s\n", use_stdlib_str ? use_stdlib_str : "Not set");
-    printf("USE_CUSTOM env var: %s\n", use_custom_str ? use_custom_str : "Not set");
-    printf("============================\n");
-}
+
 
 /**
  * Main function
@@ -1042,8 +1198,7 @@ int main(int argc, char* argv[]) {
     printf("C Encryption Benchmarking\n");
     printf("=========================\n");
     
-    // Debug ECC configuration
-    debug_ecc_config();
+
     
     // Check command line arguments
     if (argc < 2) {

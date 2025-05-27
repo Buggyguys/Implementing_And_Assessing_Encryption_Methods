@@ -2,30 +2,40 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../include/utils.h"
+#include "../include/crypto_utils.h"
 #include "camellia_common.h"
 #include "camellia_cbc.h"
 
-// Camellia-CBC encryption function
+#define AUTH_TAG_SIZE 16 // 16 bytes (128 bits) for authentication tag
+
+// Camellia-CBC encryption function with authentication
 unsigned char* camellia_cbc_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For now, this is a placeholder implementation
-    // In a real implementation, you would use the Camellia block cipher in CBC mode
-    
-    // Calculate the output length (data + IV)
+    // Calculate the output length (data + IV + tag)
     // In CBC mode, we need to pad the data to a multiple of the block size
     int block_size = CAMELLIA_BLOCK_SIZE;
     int padded_length = ((data_length + block_size - 1) / block_size) * block_size;
-    *output_length = padded_length + context->iv_length;
     
-    // Allocate memory for the output
-    unsigned char* output = (unsigned char*)malloc(*output_length);
+    // Set standard IV size if not already set
+    if (context->iv_length == 0) {
+        context->iv_length = crypto_get_standard_iv_size("Camellia", "CBC"); // 16 bytes
+    }
+    
+    // Calculate tag size
+    int tag_size = AUTH_TAG_SIZE;
+    
+    // Total output = IV + padded data + tag
+    *output_length = context->iv_length + padded_length + tag_size;
+    
+    // Allocate memory for the output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(*output_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for Camellia-CBC encryption output\n");
         return NULL;
     }
     
-    // Structure of output: IV + Ciphertext
+    // Structure of output: IV + Ciphertext + Tag
     
     // Copy the IV to the output
     memcpy(output, context->iv, context->iv_length);
@@ -60,47 +70,72 @@ unsigned char* camellia_cbc_encrypt(camellia_context_t* context, const unsigned 
         prev_block[i % CAMELLIA_BLOCK_SIZE] = output[context->iv_length + i];
     }
     
+    // Generate authentication tag for the encrypted data
+    unsigned char* ciphertext = output + context->iv_length;
+    unsigned char* tag = output + context->iv_length + padded_length;
+    
+    if (!crypto_generate_authentication_tag(tag, tag_size, ciphertext, padded_length, 
+                                           context->key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(output, *output_length);
+        return NULL;
+    }
+    
     return output;
 }
 
-// Camellia-CBC decryption function
+// Camellia-CBC decryption function with authentication verification
 unsigned char* camellia_cbc_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For now, this is a placeholder implementation
-    // In a real implementation, you would use the Camellia block cipher in CBC mode
+    // Set standard IV size if not already set
+    if (context->iv_length == 0) {
+        context->iv_length = crypto_get_standard_iv_size("Camellia", "CBC"); // 16 bytes
+    }
     
-    // Check if the data is large enough to contain the IV
-    if (data_length < context->iv_length) {
+    // Calculate tag size
+    int tag_size = AUTH_TAG_SIZE;
+    
+    // Check if the data is large enough to contain the IV and tag
+    if (data_length < context->iv_length + tag_size) {
         fprintf(stderr, "Error: Invalid Camellia-CBC ciphertext length\n");
         return NULL;
     }
     
     // Calculate the plaintext length (including padding)
-    int padded_length = data_length - context->iv_length;
+    int padded_length = data_length - context->iv_length - tag_size;
     
-    // Allocate memory for the plaintext
-    unsigned char* plaintext = (unsigned char*)malloc(padded_length);
+    // Allocate memory for the plaintext using secure allocation
+    unsigned char* plaintext = (unsigned char*)crypto_secure_alloc(padded_length);
     if (!plaintext) {
         fprintf(stderr, "Error: Could not allocate memory for Camellia-CBC decryption output\n");
         return NULL;
     }
     
-    // Extract the IV from the ciphertext
-    unsigned char iv[CAMELLIA_BLOCK_SIZE];
-    memcpy(iv, data, context->iv_length);
+    // Extract the IV, ciphertext and tag from the input data
+    const unsigned char* iv = data;
+    const unsigned char* ciphertext = data + context->iv_length;
+    const unsigned char* tag = data + context->iv_length + padded_length;
+    
+    // Verify the authentication tag first
+    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, padded_length, 
+                                        context->key, context->key_length)) {
+        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
+        crypto_secure_free(plaintext, padded_length);
+        return NULL; // Fail securely on authentication failure
+    }
     
     // For this placeholder, we'll just XOR the data with the key as a simple "decryption"
     // In a real implementation, you would use the Camellia cipher in CBC mode
     for (int i = 0; i < padded_length; i++) {
         // XOR with key (simple substitution for placeholder)
-        unsigned char xored = data[context->iv_length + i] ^ context->key[i % context->key_length];
+        unsigned char xored = ciphertext[i] ^ context->key[i % context->key_length];
         
         // XOR with previous ciphertext block (or IV for the first block)
         if (i < CAMELLIA_BLOCK_SIZE) {
             plaintext[i] = xored ^ iv[i];
         } else {
-            plaintext[i] = xored ^ data[context->iv_length + i - CAMELLIA_BLOCK_SIZE];
+            plaintext[i] = xored ^ ciphertext[i - CAMELLIA_BLOCK_SIZE];
         }
     }
     

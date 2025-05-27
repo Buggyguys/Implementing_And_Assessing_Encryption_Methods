@@ -12,26 +12,11 @@ typedef enum {
     PADDING_OAEP       // Optimal Asymmetric Encryption Padding
 } rsa_padding_type_t;
 
-// RSA key structure
-typedef struct {
-    RSA* rsa;             // OpenSSL RSA key
-    unsigned char* n;     // Modulus (public)
-    unsigned char* e;     // Public exponent
-    unsigned char* d;     // Private exponent
-    int bits;             // Key size in bits
-    int size;             // Key size in bytes
-} rsa_key_t;
-
 // RSA context structure
 typedef struct {
-    int key_size;          // Key size in bits (1024, 2048, 2072, 4096)
+    int key_size;          // Key size in bits (1024, 2048, 3072, 4096)
     int is_custom;         // Whether this is a custom implementation
     rsa_padding_type_t padding_type; // Padding type (PKCS#1 v1.5 or OAEP)
-    int key_reuse;         // Whether to reuse keys
-    int key_count;         // Number of keys to use for key reuse
-    
-    rsa_key_t** keys;      // Array of RSA keys for key reuse
-    int current_key_index; // Current key index for key reuse
     
     // For OpenSSL implementation
     RSA* rsa;              // Current RSA key being used
@@ -67,13 +52,7 @@ unsigned char* rsa_custom_decrypt_stream(void* context, const unsigned char* dat
 // Key management functions
 int rsa_set_key_size(rsa_context_t* context, int key_size);
 int rsa_set_padding(rsa_context_t* context, rsa_padding_type_t padding_type);
-int rsa_set_key_reuse(rsa_context_t* context, int key_reuse, int key_count);
 RSA* rsa_generate_new_key(int key_size);
-void rsa_free_key(rsa_key_t* key);
-rsa_key_t* rsa_create_key_from_rsa(RSA* rsa_key);
-RSA* rsa_get_current_key(rsa_context_t* context);
-rsa_key_t* rsa_get_current_key_struct(rsa_context_t* context);
-int rsa_move_to_next_key(rsa_context_t* context);
 
 // Helper functions for RSA operations
 int rsa_get_max_data_size(rsa_context_t* context);

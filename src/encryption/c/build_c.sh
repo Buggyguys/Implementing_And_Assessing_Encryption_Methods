@@ -61,14 +61,56 @@ if [ "$(uname)" == "Darwin" ]; then
     
     JSON_C_INCLUDE="${BREW_PREFIX}/include"
     JSON_C_LIB="${BREW_PREFIX}/lib"
+    
+    # Check for OpenSSL in Homebrew
+    if [ -d "${BREW_PREFIX}/opt/openssl@3" ]; then
+        OPENSSL_PREFIX="${BREW_PREFIX}/opt/openssl@3"
+    elif [ -d "${BREW_PREFIX}/opt/openssl@1.1" ]; then
+        OPENSSL_PREFIX="${BREW_PREFIX}/opt/openssl@1.1"
+    elif [ -d "${BREW_PREFIX}/opt/openssl" ]; then
+        OPENSSL_PREFIX="${BREW_PREFIX}/opt/openssl"
+    else
+        echo "Error: OpenSSL not found in Homebrew"
+        exit 1
+    fi
+    
+    OPENSSL_INCLUDE="${OPENSSL_PREFIX}/include"
+    OPENSSL_LIB="${OPENSSL_PREFIX}/lib"
+    
+    # Verify OpenSSL headers exist
+    if [ ! -f "${OPENSSL_INCLUDE}/openssl/rsa.h" ]; then
+        echo "Error: OpenSSL headers not found at ${OPENSSL_INCLUDE}/openssl"
+        echo "Please install OpenSSL with Homebrew: brew install openssl"
+        exit 1
+    fi
+    
 elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
     # Linux
     JSON_C_INCLUDE="/usr/include"
     JSON_C_LIB="/usr/lib"
+    OPENSSL_INCLUDE="/usr/include"
+    OPENSSL_LIB="/usr/lib"
+    
+    # Check if OpenSSL headers exist
+    if [ ! -f "${OPENSSL_INCLUDE}/openssl/rsa.h" ]; then
+        echo "Error: OpenSSL headers not found at ${OPENSSL_INCLUDE}/openssl"
+        echo "Please install OpenSSL development headers:"
+        echo "  Debian/Ubuntu: apt-get install libssl-dev"
+        echo "  RHEL/CentOS: yum install openssl-devel"
+        exit 1
+    fi
 fi
 
 echo "Using JSON-C include path: ${JSON_C_INCLUDE}"
 echo "Using JSON-C library path: ${JSON_C_LIB}"
+echo "Using OpenSSL include path: ${OPENSSL_INCLUDE}"
+echo "Using OpenSSL library path: ${OPENSSL_LIB}"
+
+# Define our include paths - use direct paths without quotes
+INCLUDE_FLAGS="-I${SCRIPT_DIR}/include -I${JSON_C_INCLUDE} -I${OPENSSL_INCLUDE} -I${SCRIPT_DIR}"
+
+# Common compilation flags
+CFLAGS="-Wall -O2 ${INCLUDE_FLAGS} -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations"
 
 # Helper function to check if a file exists and contains actual implementation
 # rather than just being a placeholder
@@ -86,16 +128,24 @@ check_implementation() {
 # Compile the implementation files
 echo "Compiling implementation files..."
 
+# First, compile cJSON as it's used by all implementations
+echo "Compiling cJSON..."
+gcc ${CFLAGS} -c -o build/cJSON.o include/cJSON.c
+
+# Compile crypto utilities
+echo "Compiling crypto utilities..."
+gcc ${CFLAGS} -c -o build/crypto_utils.o include/crypto_utils.c
+
 # AES implementation
 echo "Compiling AES..."
 # Compile individual AES mode files
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_gcm.o aes/aes_gcm.c
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_cbc.o aes/aes_cbc.c
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_ctr.o aes/aes_ctr.c
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_ecb.o aes/aes_ecb.c
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_key.o aes/aes_key.c
+gcc ${CFLAGS} -c -o build/aes_gcm.o aes/aes_gcm.c
+gcc ${CFLAGS} -c -o build/aes_cbc.o aes/aes_cbc.c
+gcc ${CFLAGS} -c -o build/aes_ctr.o aes/aes_ctr.c
+gcc ${CFLAGS} -c -o build/aes_ecb.o aes/aes_ecb.c
+gcc ${CFLAGS} -c -o build/aes_key.o aes/aes_key.c
 # Compile main AES implementation
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/aes_implementation.o aes/implementation.c
+gcc ${CFLAGS} -c -o build/aes_implementation.o aes/implementation.c
 
 # Camellia implementation
 echo "Compiling Camellia..."
@@ -108,14 +158,14 @@ if ! check_implementation "camellia/implementation.c"; then
 else
     # Compile individual Camellia mode files
     echo "Compiling Camellia components..."
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_common.o camellia/camellia_common.c
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_key.o camellia/camellia_key.c
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_gcm.o camellia/camellia_gcm.c
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_cbc.o camellia/camellia_cbc.c
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_ctr.o camellia/camellia_ctr.c
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_ecb.o camellia/camellia_ecb.c
+    gcc ${CFLAGS} -c -o build/camellia_common.o camellia/camellia_common.c
+    gcc ${CFLAGS} -c -o build/camellia_key.o camellia/camellia_key.c
+    gcc ${CFLAGS} -c -o build/camellia_gcm.o camellia/camellia_gcm.c
+    gcc ${CFLAGS} -c -o build/camellia_cbc.o camellia/camellia_cbc.c
+    gcc ${CFLAGS} -c -o build/camellia_ctr.o camellia/camellia_ctr.c
+    gcc ${CFLAGS} -c -o build/camellia_ecb.o camellia/camellia_ecb.c
 fi
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/camellia_implementation.o camellia/implementation.c
+gcc ${CFLAGS} -c -o build/camellia_implementation.o camellia/implementation.c
 
 # ChaCha20 implementation
 echo "Compiling ChaCha20..."
@@ -126,7 +176,7 @@ if ! check_implementation "chacha/implementation.c"; then
     echo "#include \"implementation.h\"" >> chacha/implementation.c
     echo "void register_chacha_implementations(implementation_registry_t* registry) {}" >> chacha/implementation.c
 fi
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/chacha_implementation.o chacha/implementation.c
+gcc ${CFLAGS} -c -o build/chacha_implementation.o chacha/implementation.c
 
 # RSA implementation
 echo "Compiling RSA..."
@@ -137,17 +187,17 @@ if ! check_implementation "rsa/implementation.c"; then
     echo "#include \"implementation.h\"" >> rsa/implementation.c
     echo "void register_rsa_implementations(implementation_registry_t* registry) {}" >> rsa/implementation.c
 fi
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/rsa_implementation.o rsa/implementation.c
+gcc ${CFLAGS} -c -o build/rsa_implementation.o rsa/implementation.c
 
 # Check for and compile RSA helper files if they exist
 if [ -f "rsa/rsa_key.c" ]; then
     echo "Compiling RSA key management..."
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/rsa_key.o rsa/rsa_key.c
+    gcc ${CFLAGS} -c -o build/rsa_key.o rsa/rsa_key.c
 fi
 
 if [ -f "rsa/rsa_common.c" ]; then
     echo "Compiling RSA common functions..."
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/rsa_common.o rsa/rsa_common.c
+    gcc ${CFLAGS} -c -o build/rsa_common.o rsa/rsa_common.c
 fi
 
 # ECC implementation
@@ -159,39 +209,41 @@ if ! check_implementation "ecc/implementation.c"; then
     echo "#include \"implementation.h\"" >> ecc/implementation.c
     echo "void register_ecc_implementations(implementation_registry_t* registry) {}" >> ecc/implementation.c
 fi
-gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/ecc_implementation.o ecc/implementation.c
+gcc ${CFLAGS} -c -o build/ecc_implementation.o ecc/implementation.c
 
 # Check for and compile ECC helper files if they exist
 if [ -f "ecc/ecc_common.c" ]; then
     echo "Compiling ECC common functions..."
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/ecc_common.o ecc/ecc_common.c
+    gcc ${CFLAGS} -c -o build/ecc_common.o ecc/ecc_common.c
 fi
 
 if [ -f "ecc/ecc_key.c" ]; then
     echo "Compiling ECC key management..."
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/ecc_key.o ecc/ecc_key.c
+    gcc ${CFLAGS} -c -o build/ecc_key.o ecc/ecc_key.c
 fi
 
 if [ -f "ecc/encryption_ecc.c" ]; then
     echo "Compiling ECC encryption functions..."
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/encryption_ecc.o ecc/encryption_ecc.c
+    gcc ${CFLAGS} -c -o build/encryption_ecc.o ecc/encryption_ecc.c
 fi
 
 if [ -f "ecc/decryption_ecc.c" ]; then
     echo "Compiling ECC decryption functions..."
-    gcc -Wall -O2 -I"${JSON_C_INCLUDE}" -I"${SCRIPT_DIR}" -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -c -o build/decryption_ecc.o ecc/decryption_ecc.c
+    gcc ${CFLAGS} -c -o build/decryption_ecc.o ecc/decryption_ecc.c
 fi
 
 # Compile the core with all implementations
 echo "Compiling C core..."
 gcc -Wall -O2 \
-    -I"${JSON_C_INCLUDE}" \
-    -I"${SCRIPT_DIR}" \
+    ${INCLUDE_FLAGS} \
     -DOPENSSL_API_COMPAT=0x10100000L \
     -Wno-deprecated-declarations \
     -L"${JSON_C_LIB}" \
-    -o c_core \
+    -L"${OPENSSL_LIB}" \
+    -o build/c_core \
     c_core.c \
+    build/cJSON.o \
+    build/crypto_utils.o \
     build/aes_implementation.o \
     build/aes_gcm.o \
     build/aes_cbc.o \
@@ -214,14 +266,12 @@ gcc -Wall -O2 \
     $([ -f build/ecc_key.o ] && echo "build/ecc_key.o") \
     $([ -f build/encryption_ecc.o ] && echo "build/encryption_ecc.o") \
     $([ -f build/decryption_ecc.o ] && echo "build/decryption_ecc.o") \
-    -ljson-c -lm -lcrypto
+    -lcrypto -lssl -ldl -lpthread
 
-# Also copy the executable to the project build directory for use by the orchestrator
-echo "Copying executable to ${BUILD_DIR}/c_encryption_benchmark"
-cp c_core "${BUILD_DIR}/c_encryption_benchmark"
+# Create a symlink in the current directory for backward compatibility
+ln -sf build/c_core c_core
 
-# Set permissions
-chmod +x c_core
-chmod +x "${BUILD_DIR}/c_encryption_benchmark"
+# Also copy to project build directory
+cp build/c_core "${BUILD_DIR}/c_encryption_benchmark"
 
-echo "C implementation built successfully" 
+echo "C encryption implementation build complete!" 

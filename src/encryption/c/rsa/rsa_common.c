@@ -13,7 +13,7 @@
 int rsa_get_max_data_size(rsa_context_t* context) {
     if (!context) return 0;
     
-    RSA* rsa_key = rsa_get_current_key(context);
+    RSA* rsa_key = context->rsa;
     if (!rsa_key) {
         return 0;
     }
@@ -31,18 +31,7 @@ int rsa_get_max_data_size(rsa_context_t* context) {
     }
 }
 
-// Calculate the output size for RSA encryption
-int rsa_calculate_output_size(rsa_context_t* context, int data_length) {
-    if (!context) return 0;
-    
-    RSA* rsa_key = rsa_get_current_key(context);
-    if (!rsa_key) {
-        return 0;
-    }
-    
-    // RSA encryption always produces output of the key size
-    return RSA_size(rsa_key);
-}
+
 
 // Encrypt a block of data with RSA
 int rsa_encrypt_block(rsa_context_t* context, const unsigned char* data, int data_length, unsigned char* output, RSA* key) {

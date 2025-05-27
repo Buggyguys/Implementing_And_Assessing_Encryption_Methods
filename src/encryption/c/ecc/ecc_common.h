@@ -31,7 +31,6 @@ typedef struct {
 // Helper functions
 int ecc_get_nid_for_curve(ecc_curve_type_t curve);
 const char* ecc_get_curve_name(ecc_curve_type_t curve);
-int ecc_set_curve(ecc_context_t* context, ecc_curve_type_t curve);
 
 // Basic ECC operations
 EC_KEY* ecc_generate_key_pair(ecc_curve_type_t curve);

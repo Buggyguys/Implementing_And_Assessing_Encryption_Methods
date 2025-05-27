@@ -2,20 +2,28 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../include/utils.h"
+#include "../include/crypto_utils.h"
 #include "aes_cbc.h"
 
-// Standard AES-CBC implementation (simple for now)
+// Standard AES-CBC implementation with authentication tag
 unsigned char* aes_cbc_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For testing, we'll implement a simple CBC mode
-    // In a real implementation, this would use a proper AES-CBC mode
+    // For testing, we'll implement a simple CBC mode with authentication
     
-    // Calculate output size (original + IV)
-    int total_length = data_length + context->iv_length;
+    // Calculate standard IV size if not already set
+    if (context->iv_length == 0) {
+        context->iv_length = crypto_get_standard_iv_size("AES", "CBC"); // 16 bytes
+    }
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(total_length);
+    // Calculate tag size for authentication
+    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    
+    // Calculate output size (original + IV + tag)
+    int total_length = data_length + context->iv_length + tag_size;
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
@@ -37,6 +45,16 @@ unsigned char* aes_cbc_encrypt(aes_context_t* context, const unsigned char* data
         prev_block[i % 16] = output[context->iv_length + i];
     }
     
+    // Generate authentication tag for the ciphertext
+    unsigned char* tag = output + context->iv_length + data_length;
+    if (!crypto_generate_authentication_tag(tag, tag_size, 
+                                          output + context->iv_length, data_length,
+                                          context->key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(output, total_length);
+        return NULL;
+    }
+    
     // Set the output length
     if (output_length) {
         *output_length = total_length;
@@ -48,31 +66,43 @@ unsigned char* aes_cbc_encrypt(aes_context_t* context, const unsigned char* data
 unsigned char* aes_cbc_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For testing, we'll implement a simple CBC decryption
-    // In a real implementation, this would use a proper AES-CBC mode
+    // For testing, we'll implement a simple CBC decryption with authentication
     
-    // Ensure we have enough data (at least for the IV)
-    if (data_length <= context->iv_length) {
+    // Calculate tag size for authentication
+    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    
+    // Ensure we have enough data (at least for the IV and tag)
+    if (data_length <= context->iv_length + tag_size) {
         fprintf(stderr, "Error: Not enough data for CBC decryption\n");
         return NULL;
     }
     
     // Extract IV from the beginning of data
     if (context->iv) {
-        free(context->iv);
+        crypto_secure_free(context->iv, context->iv_length);
     }
-    context->iv = (unsigned char*)malloc(context->iv_length);
+    context->iv = (unsigned char*)crypto_secure_alloc(context->iv_length);
     if (!context->iv) {
         fprintf(stderr, "Error: Could not allocate memory for CBC IV\n");
         return NULL;
     }
     memcpy(context->iv, data, context->iv_length);
     
-    // Calculate output size (data without IV)
-    int plaintext_len = data_length - context->iv_length;
+    // Calculate output size (data without IV and tag)
+    int plaintext_len = data_length - context->iv_length - tag_size;
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(plaintext_len);
+    // Verify the authentication tag first
+    const unsigned char* tag = data + context->iv_length + plaintext_len;
+    const unsigned char* ciphertext = data + context->iv_length;
+    
+    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
+                                        context->key, context->key_length)) {
+        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
+        return NULL; // Fail securely on authentication failure
+    }
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
         return NULL;
@@ -99,17 +129,25 @@ unsigned char* aes_cbc_decrypt(aes_context_t* context, const unsigned char* data
     return output;
 }
 
-// Custom AES-CBC implementation
+// Custom AES-CBC implementation with authentication
 unsigned char* aes_cbc_custom_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // For testing, we'll implement a custom CBC mode with a different approach
     
-    // Calculate output size (original + IV)
-    int total_length = data_length + context->iv_length;
+    // Calculate standard IV size if not already set
+    if (context->iv_length == 0) {
+        context->iv_length = crypto_get_standard_iv_size("AES", "CBC"); // 16 bytes
+    }
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(total_length);
+    // Calculate tag size for authentication
+    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    
+    // Calculate output size (original + IV + tag)
+    int total_length = data_length + context->iv_length + tag_size;
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
@@ -122,11 +160,11 @@ unsigned char* aes_cbc_custom_encrypt(aes_context_t* context, const unsigned cha
     unsigned char prev_block[16] = {0};
     memcpy(prev_block, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
     
-    // Create a rotated key for a different pattern
-    unsigned char* rotated_key = (unsigned char*)malloc(context->key_length);
+    // Create a rotated key for a different pattern using secure allocation
+    unsigned char* rotated_key = (unsigned char*)crypto_secure_alloc(context->key_length);
     if (!rotated_key) {
         fprintf(stderr, "Error: Could not allocate memory for rotated key\n");
-        free(output);
+        crypto_secure_free(output, total_length);
         return NULL;
     }
     
@@ -151,7 +189,19 @@ unsigned char* aes_cbc_custom_encrypt(aes_context_t* context, const unsigned cha
         output[context->iv_length + i] ^= (i % 256);
     }
     
-    free(rotated_key);
+    // Generate authentication tag using rotated key
+    unsigned char* tag = output + context->iv_length + data_length;
+    if (!crypto_generate_authentication_tag(tag, tag_size, 
+                                          output + context->iv_length, data_length,
+                                          rotated_key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        crypto_secure_free(output, total_length);
+        return NULL;
+    }
+    
+    // Securely free rotated key
+    crypto_secure_free(rotated_key, context->key_length);
     
     // Set the output length
     if (output_length) {
@@ -164,42 +214,33 @@ unsigned char* aes_cbc_custom_encrypt(aes_context_t* context, const unsigned cha
 unsigned char* aes_cbc_custom_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Ensure we have enough data (at least for the IV)
-    if (data_length <= context->iv_length) {
+    // Calculate tag size for authentication
+    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    
+    // Ensure we have enough data (at least for the IV and tag)
+    if (data_length <= context->iv_length + tag_size) {
         fprintf(stderr, "Error: Not enough data for CBC decryption\n");
         return NULL;
     }
     
     // Extract IV from the beginning of data
     if (context->iv) {
-        free(context->iv);
+        crypto_secure_free(context->iv, context->iv_length);
     }
-    context->iv = (unsigned char*)malloc(context->iv_length);
+    context->iv = (unsigned char*)crypto_secure_alloc(context->iv_length);
     if (!context->iv) {
         fprintf(stderr, "Error: Could not allocate memory for CBC IV\n");
         return NULL;
     }
     memcpy(context->iv, data, context->iv_length);
     
-    // Calculate output size (data without IV)
-    int plaintext_len = data_length - context->iv_length;
-    
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(plaintext_len);
-    if (!output) {
-        fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
-        return NULL;
-    }
-    
-    // Custom CBC decryption - reverse the custom encryption
-    unsigned char prev_block[16] = {0};
-    memcpy(prev_block, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    // Calculate output size (data without IV and tag)
+    int plaintext_len = data_length - context->iv_length - tag_size;
     
     // Create a rotated key for a different pattern (same as in encryption)
-    unsigned char* rotated_key = (unsigned char*)malloc(context->key_length);
+    unsigned char* rotated_key = (unsigned char*)crypto_secure_alloc(context->key_length);
     if (!rotated_key) {
         fprintf(stderr, "Error: Could not allocate memory for rotated key\n");
-        free(output);
         return NULL;
     }
     
@@ -213,6 +254,29 @@ unsigned char* aes_cbc_custom_decrypt(aes_context_t* context, const unsigned cha
         memcpy(rotated_key + context->key_length - 2, temp, 2);
     }
     
+    // Verify the authentication tag first
+    const unsigned char* tag = data + context->iv_length + plaintext_len;
+    const unsigned char* ciphertext = data + context->iv_length;
+    
+    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
+                                        rotated_key, context->key_length)) {
+        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        return NULL; // Fail securely on authentication failure
+    }
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
+    if (!output) {
+        fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        return NULL;
+    }
+    
+    // Custom CBC decryption - reverse the custom encryption
+    unsigned char prev_block[16] = {0};
+    memcpy(prev_block, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    
     for (int i = 0; i < plaintext_len; i++) {
         // Un-XOR with i
         unsigned char block = data[context->iv_length + i] ^ (i % 256);
@@ -224,7 +288,8 @@ unsigned char* aes_cbc_custom_decrypt(aes_context_t* context, const unsigned cha
         prev_block[i % 16] = block;
     }
     
-    free(rotated_key);
+    // Securely free rotated key
+    crypto_secure_free(rotated_key, context->key_length);
     
     // Set the output length
     if (output_length) {

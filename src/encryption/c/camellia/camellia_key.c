@@ -25,7 +25,7 @@ unsigned char* camellia_generate_key(void* context, int* key_length) {
         return NULL;
     }
     
-    // Generate random key (temporary implementation)
+    // Generate random key
     generate_random_bytes(camellia_context->key, camellia_context->key_length);
     
     // Generate IV for modes that require it
@@ -51,7 +51,7 @@ unsigned char* camellia_generate_key(void* context, int* key_length) {
             return NULL;
         }
         
-        // Generate random IV (temporary implementation)
+        // Generate random IV
         generate_random_bytes(camellia_context->iv, camellia_context->iv_length);
     }
     

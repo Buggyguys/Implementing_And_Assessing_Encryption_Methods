@@ -2,28 +2,33 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../include/utils.h"
+#include "../include/crypto_utils.h"
 #include "camellia_common.h"
 #include "camellia_ecb.h"
 
-// Camellia-ECB encryption function
+#define AUTH_TAG_SIZE 16 // 16 bytes (128 bits) for authentication tag
+
+// Camellia-ECB encryption function with authentication
 unsigned char* camellia_ecb_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For now, this is a placeholder implementation
-    // In a real implementation, you would use the Camellia block cipher in ECB mode
+    // Calculate tag size
+    int tag_size = AUTH_TAG_SIZE;
     
-    // Calculate the output length
+    // Calculate the output length (data + tag)
     // In ECB mode, we need to pad the data to a multiple of the block size
     int block_size = CAMELLIA_BLOCK_SIZE;
     int padded_length = ((data_length + block_size - 1) / block_size) * block_size;
-    *output_length = padded_length;
+    *output_length = padded_length + tag_size;
     
-    // Allocate memory for the output
-    unsigned char* output = (unsigned char*)malloc(*output_length);
+    // Allocate memory for the output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(*output_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for Camellia-ECB encryption output\n");
         return NULL;
     }
+    
+    // Structure of output: Ciphertext + Tag
     
     // For this placeholder, we'll just XOR the data with the key as a simple "encryption"
     // In a real implementation, you would use the Camellia cipher in ECB mode
@@ -37,24 +42,55 @@ unsigned char* camellia_ecb_encrypt(camellia_context_t* context, const unsigned 
         output[i] = padding_byte ^ context->key[i % context->key_length];
     }
     
+    // Generate authentication tag for the encrypted data
+    unsigned char* ciphertext = output;
+    unsigned char* tag = output + padded_length;
+    
+    if (!crypto_generate_authentication_tag(tag, tag_size, ciphertext, padded_length, 
+                                           context->key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(output, *output_length);
+        return NULL;
+    }
+    
     return output;
 }
 
-// Camellia-ECB decryption function
+// Camellia-ECB decryption function with authentication verification
 unsigned char* camellia_ecb_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For now, this is a placeholder implementation
-    // In a real implementation, you would use the Camellia block cipher in ECB mode
+    // Calculate tag size
+    int tag_size = AUTH_TAG_SIZE;
     
-    // Check if the data length is a multiple of the block size
-    if (data_length % CAMELLIA_BLOCK_SIZE != 0) {
+    // Check if the data is large enough to contain at least one block plus tag
+    if (data_length < CAMELLIA_BLOCK_SIZE + tag_size) {
         fprintf(stderr, "Error: Invalid Camellia-ECB ciphertext length\n");
         return NULL;
     }
     
-    // Allocate memory for the plaintext
-    unsigned char* plaintext = (unsigned char*)malloc(data_length);
+    // Calculate the ciphertext length (excluding tag)
+    int ciphertext_length = data_length - tag_size;
+    
+    // Check if the ciphertext length is a multiple of the block size
+    if (ciphertext_length % CAMELLIA_BLOCK_SIZE != 0) {
+        fprintf(stderr, "Error: Invalid Camellia-ECB ciphertext length (not a multiple of block size)\n");
+        return NULL;
+    }
+    
+    // Extract ciphertext and tag
+    const unsigned char* ciphertext = data;
+    const unsigned char* tag = data + ciphertext_length;
+    
+    // Verify the authentication tag first
+    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, ciphertext_length, 
+                                        context->key, context->key_length)) {
+        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
+        return NULL; // Fail securely on authentication failure
+    }
+    
+    // Allocate memory for the plaintext using secure allocation
+    unsigned char* plaintext = (unsigned char*)crypto_secure_alloc(ciphertext_length);
     if (!plaintext) {
         fprintf(stderr, "Error: Could not allocate memory for Camellia-ECB decryption output\n");
         return NULL;
@@ -62,16 +98,16 @@ unsigned char* camellia_ecb_decrypt(camellia_context_t* context, const unsigned 
     
     // For this placeholder, we'll just XOR the data with the key as a simple "decryption"
     // In a real implementation, you would use the Camellia cipher in ECB mode
-    for (int i = 0; i < data_length; i++) {
-        plaintext[i] = data[i] ^ context->key[i % context->key_length];
+    for (int i = 0; i < ciphertext_length; i++) {
+        plaintext[i] = ciphertext[i] ^ context->key[i % context->key_length];
     }
     
     // Check for and remove padding
-    unsigned char padding_byte = plaintext[data_length - 1];
+    unsigned char padding_byte = plaintext[ciphertext_length - 1];
     if (padding_byte > 0 && padding_byte <= CAMELLIA_BLOCK_SIZE) {
         // Verify padding
         int valid_padding = 1;
-        for (int i = data_length - padding_byte; i < data_length; i++) {
+        for (int i = ciphertext_length - padding_byte; i < ciphertext_length; i++) {
             if (plaintext[i] != padding_byte) {
                 valid_padding = 0;
                 break;
@@ -79,11 +115,11 @@ unsigned char* camellia_ecb_decrypt(camellia_context_t* context, const unsigned 
         }
         
         if (valid_padding) {
-            data_length -= padding_byte;
+            ciphertext_length -= padding_byte;
         }
     }
     
-    *output_length = data_length;
+    *output_length = ciphertext_length;
     
     return plaintext;
 }

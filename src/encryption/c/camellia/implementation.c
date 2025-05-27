@@ -1,10 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-// Temporarily comment out OpenSSL headers for initial testing
-// #include <openssl/evp.h>
-// #include <openssl/err.h>
-// #include <openssl/rand.h>
+
 
 #include "implementation.h"
 #include "../include/utils.h"
@@ -236,18 +233,6 @@ unsigned char* camellia_decrypt(void* context, const unsigned char* data, int da
     }
 }
 
-unsigned char* camellia_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    // For simplicity, the stream version just calls the regular encrypt function
-    // In a real implementation, this would handle streaming differently
-    return camellia_encrypt(context, data, data_length, key, output_length);
-}
-
-unsigned char* camellia_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    // For simplicity, the stream version just calls the regular decrypt function
-    // In a real implementation, this would handle streaming differently
-    return camellia_decrypt(context, data, data_length, key, output_length);
-}
-
 // Custom implementation functions
 void* camellia_custom_init(void) {
     camellia_context_t* context = (camellia_context_t*)malloc(sizeof(camellia_context_t));
@@ -269,7 +254,7 @@ void* camellia_custom_init(void) {
 }
 
 void camellia_custom_cleanup(void* context) {
-    camellia_cleanup(context); // Reuse standard cleanup
+    camellia_cleanup(context);
 }
 
 unsigned char* camellia_custom_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
@@ -356,4 +341,16 @@ unsigned char* camellia_custom_decrypt(void* context, const unsigned char* data,
         fprintf(stderr, "Error: Unsupported Camellia mode: %s\n", camellia_context->mode);
         return NULL;
     }
+}
+
+unsigned char* camellia_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
+    // For simplicity, the stream version just calls the regular encrypt function
+    // In a real implementation, this would handle streaming differently
+    return camellia_encrypt(context, data, data_length, key, output_length);
+}
+
+unsigned char* camellia_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
+    // For simplicity, the stream version just calls the regular decrypt function
+    // In a real implementation, this would handle streaming differently
+    return camellia_decrypt(context, data, data_length, key, output_length);
 } 

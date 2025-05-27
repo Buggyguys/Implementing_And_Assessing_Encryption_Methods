@@ -82,8 +82,8 @@ def run_language_benchmark(language, config):
         script_dir = os.path.dirname(os.path.abspath(__file__))
         lang_script_path = os.path.join(script_dir, "encryption", language, f"{language}_core.py")
         
-        # If the language is not Python, we need to ensure it's compiled/built first
-        if language != "python":
+        # If the language is not Zig, we need to ensure it's compiled/built first
+        if language != "zig":
             build_script_path = os.path.join(script_dir, "encryption", language, f"build_{language}.sh")
             if os.path.exists(build_script_path):
                 logger.info(f"Building {language} implementation...")
@@ -91,8 +91,8 @@ def run_language_benchmark(language, config):
                 subprocess.run([build_script_path], check=True)
         
         # Run the language-specific benchmark
-        if language == "python":
-            # For Python, we can import and run directly
+        if language == "zig":
+            # For Zig, we can import and run directly
             sys.path.insert(0, os.path.dirname(script_dir))
             
             # Check if the script exists
@@ -108,6 +108,17 @@ def run_language_benchmark(language, config):
             
             # Call the main function
             module.main(config)
+        elif language == "java":
+            # For Java, use Java specific execution
+            java_main_class = os.path.join(script_dir, "encryption", language, "JavaCore")
+            if os.path.exists(os.path.join(script_dir, "encryption", language, "JavaCore.class")):
+                os.chmod(os.path.join(script_dir, "encryption", language), 0o755)  # Make directory executable
+                # Pass JSON config path to the Java program
+                session_json_path = os.path.join(session_dir, "test_config.json")
+                subprocess.run(["java", "-cp", os.path.join(script_dir, "encryption", language), "JavaCore", session_json_path], check=True)
+            else:
+                logger.error(f"Java core class not found at {java_main_class}")
+                return False
         else:
             # For other languages, execute the script as a subprocess
             if not os.path.exists(lang_script_path):

@@ -206,50 +206,13 @@ void ecc_cleanup(void* context) {
 
 // Custom implementation functions (for benchmarking purposes)
 void* ecc_custom_init(void) {
-    ecc_context_t* context = (ecc_context_t*)malloc(sizeof(ecc_context_t));
-    if (!context) {
-        fprintf(stderr, "Error: Could not allocate ECC context for custom implementation\n");
-        return NULL;
+    void* context = ecc_init();
+    if (context) {
+        ((ecc_context_t*)context)->is_custom = 1;
     }
-    
-    memset(context, 0, sizeof(ecc_context_t));
-    context->is_custom = 1;
-    context->curve = CURVE_P256;  // Default to P-256
-    context->ec_key = NULL;
-    context->private_key = NULL;
-    context->private_key_length = 0;
-    context->public_key = NULL;
-    context->public_key_length = 0;
-    context->shared_secret = NULL;
-    context->shared_secret_length = 0;
-    
-    // Get curve from environment variable
-    char* curve_str = getenv("ECC_CURVE");
-    if (curve_str) {
-        // Normalize curve name using the same approach as in register_ecc_implementations
-        char normalized_curve[32] = {0};
-        int j = 0;
-        for (int i = 0; curve_str[i] && j < sizeof(normalized_curve)-1; i++) {
-            if (curve_str[i] != ' ' && curve_str[i] != '-') {
-                normalized_curve[j++] = toupper(curve_str[i]);
-            }
-        }
-        
-        // Compare with normalized curve names
-        if (strcmp(normalized_curve, "P256") == 0 || strcmp(normalized_curve, "SECP256R1") == 0) {
-            context->curve = CURVE_P256;
-        } else if (strcmp(normalized_curve, "P384") == 0 || strcmp(normalized_curve, "SECP384R1") == 0) {
-            context->curve = CURVE_P384;
-        } else if (strcmp(normalized_curve, "P521") == 0 || strcmp(normalized_curve, "SECP521R1") == 0) {
-            context->curve = CURVE_P521;
-        } else {
-            fprintf(stderr, "Warning in ecc_custom_init: Unrecognized curve '%s', defaulting to P-256\n", curve_str);
-        }
-    }
-    
     return context;
 }
 
 void ecc_custom_cleanup(void* context) {
-    ecc_cleanup(context); // Same cleanup for both implementations
+    ecc_cleanup(context);
 } 

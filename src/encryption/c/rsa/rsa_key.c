@@ -31,22 +31,7 @@ int rsa_set_padding(rsa_context_t* context, rsa_padding_type_t padding_type) {
     return 1;
 }
 
-// Configure RSA key reuse and key count
-int rsa_set_key_reuse(rsa_context_t* context, int key_reuse, int key_count) {
-    if (!context) return 0;
-    
-    context->key_reuse = key_reuse ? 1 : 0;
-    
-    if (key_count < 1) {
-        key_count = 1;
-    } else if (key_count > 100) {
-        fprintf(stderr, "Warning: Key count %d exceeds maximum (100), limiting to 100\n", key_count);
-        key_count = 100;
-    }
-    
-    context->key_count = key_count;
-    return 1;
-}
+
 
 // Generate a new RSA key with specified size
 RSA* rsa_generate_new_key(int key_size) {
@@ -89,77 +74,7 @@ RSA* rsa_generate_new_key(int key_size) {
     return rsa;
 }
 
-// Free an RSA key
-void rsa_free_key(rsa_key_t* key) {
-    if (!key) return;
-    
-    if (key->rsa) {
-        RSA_free(key->rsa);
-    }
-    
-    if (key->n) free(key->n);
-    if (key->e) free(key->e);
-    if (key->d) free(key->d);
-    
-    free(key);
-}
 
-// Create an rsa_key_t structure from an RSA key
-rsa_key_t* rsa_create_key_from_rsa(RSA* rsa_key) {
-    if (!rsa_key) return NULL;
-    
-    rsa_key_t* key = (rsa_key_t*)malloc(sizeof(rsa_key_t));
-    if (!key) {
-        fprintf(stderr, "Error: Could not allocate memory for RSA key structure\n");
-        return NULL;
-    }
-    
-    memset(key, 0, sizeof(rsa_key_t));
-    
-    // Store the RSA key
-    key->rsa = rsa_key;
-    
-    // Get key size
-    key->bits = RSA_bits(rsa_key);
-    key->size = RSA_size(rsa_key);
-    
-    // For now, we don't copy the key components (n, e, d)
-    // This could be implemented if needed
-    
-    return key;
-}
-
-// Get the current RSA key from the context
-RSA* rsa_get_current_key(rsa_context_t* context) {
-    if (!context) return NULL;
-    
-    if (context->key_reuse && context->keys && context->current_key_index < context->key_count) {
-        return context->keys[context->current_key_index]->rsa;
-    } else {
-        return context->rsa;
-    }
-}
-
-// Get the current RSA key structure from the context
-rsa_key_t* rsa_get_current_key_struct(rsa_context_t* context) {
-    if (!context) return NULL;
-    
-    if (context->key_reuse && context->keys && context->current_key_index < context->key_count) {
-        return context->keys[context->current_key_index];
-    } else {
-        return NULL;
-    }
-}
-
-// Move to the next key in the key reuse array
-int rsa_move_to_next_key(rsa_context_t* context) {
-    if (!context || !context->key_reuse || !context->keys || context->key_count <= 0) {
-        return 0;
-    }
-    
-    context->current_key_index = (context->current_key_index + 1) % context->key_count;
-    return 1;
-}
 
 // Export a public key in DER format
 unsigned char* rsa_export_public_key(RSA* key, int* length) {
@@ -245,10 +160,13 @@ unsigned char* rsa_export_private_key(RSA* key, int* length) {
 
 // Import a public key from DER format
 RSA* rsa_import_public_key(const unsigned char* data, int length) {
-    if (!data || length <= 0) return NULL;
+    if (!data || length <= 0) {
+        fprintf(stderr, "Error: Invalid data for RSA public key import\n");
+        return NULL;
+    }
     
     // Create a memory BIO
-    BIO* bio = BIO_new_mem_buf(data, length);
+    BIO* bio = BIO_new_mem_buf((void*)data, length);
     if (!bio) {
         fprintf(stderr, "Error: Could not create BIO for RSA key import\n");
         return NULL;
@@ -257,9 +175,21 @@ RSA* rsa_import_public_key(const unsigned char* data, int length) {
     // Read the key from DER format
     RSA* key = d2i_RSAPublicKey_bio(bio, NULL);
     if (!key) {
-        fprintf(stderr, "Error: Could not import RSA public key\n");
-        BIO_free(bio);
-        return NULL;
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        fprintf(stderr, "Error: Could not import RSA public key: %s\n", err_buf);
+        
+        // Try PKCS#1 format as fallback
+        BIO_reset(bio);
+        key = d2i_RSA_PUBKEY_bio(bio, NULL);
+        if (!key) {
+            err = ERR_get_error();
+            ERR_error_string_n(err, err_buf, sizeof(err_buf));
+            fprintf(stderr, "Error: Could not import RSA public key (PKCS#1 fallback): %s\n", err_buf);
+            BIO_free(bio);
+            return NULL;
+        }
     }
     
     BIO_free(bio);
@@ -268,10 +198,13 @@ RSA* rsa_import_public_key(const unsigned char* data, int length) {
 
 // Import a private key from DER format
 RSA* rsa_import_private_key(const unsigned char* data, int length) {
-    if (!data || length <= 0) return NULL;
+    if (!data || length <= 0) {
+        fprintf(stderr, "Error: Invalid data for RSA private key import\n");
+        return NULL;
+    }
     
     // Create a memory BIO
-    BIO* bio = BIO_new_mem_buf(data, length);
+    BIO* bio = BIO_new_mem_buf((void*)data, length);
     if (!bio) {
         fprintf(stderr, "Error: Could not create BIO for RSA key import\n");
         return NULL;
@@ -280,11 +213,16 @@ RSA* rsa_import_private_key(const unsigned char* data, int length) {
     // Read the key from DER format
     RSA* key = d2i_RSAPrivateKey_bio(bio, NULL);
     if (!key) {
-        fprintf(stderr, "Error: Could not import RSA private key\n");
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        fprintf(stderr, "Error: Could not import RSA private key: %s\n", err_buf);
         BIO_free(bio);
         return NULL;
     }
     
     BIO_free(bio);
     return key;
-} 
+}
+
+ 

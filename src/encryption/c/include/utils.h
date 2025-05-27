@@ -20,12 +20,81 @@
  * Resource usage metrics structure
  */
 typedef struct {
-    double user_time_s;
-    double system_time_s;
-    size_t peak_memory_bytes;
-    unsigned long voluntary_ctx_switches;
-    unsigned long involuntary_ctx_switches;
+    // Time measurements
+    uint64_t wall_time_ns;         // Wall clock time in nanoseconds
+    uint64_t cpu_time_ns;          // Total CPU time in nanoseconds
+    double user_time_s;            // User CPU time in seconds (for compatibility)
+    double system_time_s;          // System CPU time in seconds (for compatibility)
+    double cpu_percent;            // CPU utilization percentage
+    
+    // Memory usage
+    size_t peak_memory_bytes;      // Peak resident set size (RSS)
+    size_t allocated_memory_bytes; // Estimated allocated memory
+    
+    // System metrics
+    unsigned long voluntary_ctx_switches;   // Voluntary context switches
+    unsigned long involuntary_ctx_switches; // Involuntary context switches
+    unsigned long page_faults;              // Number of page faults
+    unsigned long cache_misses;             // Cache misses (if available)
+    
+    // Process info
+    int thread_count;              // Number of threads
+    int process_priority;          // Process priority/nice value
 } resource_usage_t;
+
+/**
+ * Get high-resolution time in nanoseconds
+ */
+static inline uint64_t get_time_ns() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+/**
+ * Get CPU time in nanoseconds
+ */
+static inline uint64_t get_cpu_time_ns() {
+    struct timespec ts;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+/**
+ * Get current thread count
+ */
+static inline int get_thread_count() {
+#ifdef __linux__
+    char buf[256];
+    int count = 0;
+    FILE* fp = fopen("/proc/self/stat", "r");
+    if (fp) {
+        if (fgets(buf, sizeof(buf), fp)) {
+            // The 20th field is the number of threads
+            char* token = strtok(buf, " ");
+            for (int i = 1; i < 20 && token != NULL; i++) {
+                token = strtok(NULL, " ");
+            }
+            if (token) {
+                count = atoi(token);
+            }
+        }
+        fclose(fp);
+    }
+    return count > 0 ? count : 1;
+#else
+    // For non-Linux platforms, just return 1 for now
+    // In production, you'd use platform-specific APIs
+    return 1;
+#endif
+}
+
+/**
+ * Get process priority (nice value)
+ */
+static inline int get_process_priority() {
+    return getpriority(PRIO_PROCESS, 0);
+}
 
 /**
  * Get current resource usage
@@ -34,8 +103,14 @@ static inline resource_usage_t get_resource_usage() {
     resource_usage_t usage = {0};
     struct rusage ru;
     
+    // Get wall time in nanoseconds
+    usage.wall_time_ns = get_time_ns();
+    
+    // Get CPU time in nanoseconds
+    usage.cpu_time_ns = get_cpu_time_ns();
+    
     if (getrusage(RUSAGE_SELF, &ru) == 0) {
-        // CPU time
+        // CPU time (compatibility fields)
         usage.user_time_s = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1000000.0;
         usage.system_time_s = ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1000000.0;
         
@@ -48,9 +123,27 @@ static inline resource_usage_t get_resource_usage() {
         usage.peak_memory_bytes = (size_t)ru.ru_maxrss * 1024;
         #endif
         
+        // Estimate allocated memory (not perfect but best we can do)
+        usage.allocated_memory_bytes = usage.peak_memory_bytes;
+        
         // Context switches
         usage.voluntary_ctx_switches = ru.ru_nvcsw;
         usage.involuntary_ctx_switches = ru.ru_nivcsw;
+        
+        // Page faults
+        usage.page_faults = ru.ru_majflt + ru.ru_minflt;
+        
+        // Cache misses - not available through rusage
+        usage.cache_misses = 0;
+        
+        // CPU percentage will be calculated in diff
+        usage.cpu_percent = 0.0;
+        
+        // Thread count
+        usage.thread_count = get_thread_count();
+        
+        // Process priority
+        usage.process_priority = get_process_priority();
     }
     
     return usage;
@@ -62,12 +155,39 @@ static inline resource_usage_t get_resource_usage() {
 static inline resource_usage_t resource_usage_diff(resource_usage_t start, resource_usage_t end) {
     resource_usage_t diff;
     
+    // Time differences
+    diff.wall_time_ns = end.wall_time_ns - start.wall_time_ns;
+    diff.cpu_time_ns = end.cpu_time_ns - start.cpu_time_ns;
     diff.user_time_s = end.user_time_s - start.user_time_s;
     diff.system_time_s = end.system_time_s - start.system_time_s;
+    
+    // Calculate CPU percentage
+    if (diff.wall_time_ns > 0) {
+        diff.cpu_percent = ((double)diff.cpu_time_ns / (double)diff.wall_time_ns) * 100.0;
+        // Cap at 100% for single-threaded or 100% * thread_count for multi-threaded
+        double max_cpu = 100.0 * end.thread_count;
+        if (diff.cpu_percent > max_cpu) {
+            diff.cpu_percent = max_cpu;
+        }
+    } else {
+        diff.cpu_percent = 0.0;
+    }
+    
+    // Memory - take the peak difference
     diff.peak_memory_bytes = end.peak_memory_bytes > start.peak_memory_bytes ? 
-                           end.peak_memory_bytes - start.peak_memory_bytes : 0;
+                           end.peak_memory_bytes : start.peak_memory_bytes;
+    diff.allocated_memory_bytes = end.allocated_memory_bytes > start.allocated_memory_bytes ?
+                                end.allocated_memory_bytes - start.allocated_memory_bytes : 0;
+    
+    // System metrics
     diff.voluntary_ctx_switches = end.voluntary_ctx_switches - start.voluntary_ctx_switches;
     diff.involuntary_ctx_switches = end.involuntary_ctx_switches - start.involuntary_ctx_switches;
+    diff.page_faults = end.page_faults - start.page_faults;
+    diff.cache_misses = end.cache_misses - start.cache_misses;
+    
+    // Process info - use end values
+    diff.thread_count = end.thread_count;
+    diff.process_priority = end.process_priority;
     
     return diff;
 }

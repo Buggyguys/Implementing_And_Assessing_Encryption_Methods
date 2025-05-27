@@ -1,7 +1,7 @@
 #ifndef C_CORE_H
 #define C_CORE_H
 
-#include <json-c/json.h>
+#include "include/cJSON.h"
 
 // Define maximum path length
 #define MAX_PATH_LENGTH 1024
@@ -50,7 +50,8 @@ typedef struct {
     // Test parameters
     int iterations;
     char dataset_path[1024];
-    size_t dataset_size;
+    size_t dataset_size_bytes;
+    int dataset_size_kb;
     int use_stdlib;
     int use_custom;
     char processing_strategy[32];
@@ -59,8 +60,8 @@ typedef struct {
     // C-specific parameters
     int memory_mode;
     
-    // Results directory
-    char results_dir[1024];
+    // Session directory
+    char session_dir[1024];
 } TestConfig;
 
 // Function prototypes

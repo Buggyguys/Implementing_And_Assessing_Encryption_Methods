@@ -5,8 +5,6 @@ Allows users to configure benchmarking tests.
 
 import os
 import json
-import platform
-import psutil
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import (
@@ -16,77 +14,10 @@ from PyQt6.QtWidgets import (
     QFormLayout, QSizePolicy, QScrollArea, QMessageBox,
     QGridLayout, QTabWidget, QMainWindow
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
-from PyQt6.QtWidgets import QApplication
-import subprocess
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 
-
-class OrchestrationThread(QThread):
-    """Thread to run the orchestrator without blocking the UI."""
-    
-    progress_update = pyqtSignal(str)
-    orchestration_complete = pyqtSignal(bool, str)  # Success flag and message
-    
-    def __init__(self, orchestrator_func):
-        super().__init__()
-        self.orchestrator_func = orchestrator_func
-        self.running = False
-        self.success = False
-        self.error_message = ""
-        # Set this as a daemon thread (will be killed when main thread exits)
-        self.setTerminationEnabled(True)
-    
-    def run(self):
-        """Execute the orchestrator."""
-        try:
-            # Set running flag
-            self.running = True
-            
-            # Redirect logging to capture progress
-            self._setup_logging()
-            
-            # Run the orchestrator
-            self.progress_update.emit("Starting orchestration process...")
-            result = self.orchestrator_func()
-            self.success = result is True
-            
-            if self.success:
-                self.progress_update.emit("Orchestration completed successfully!")
-                self.orchestration_complete.emit(True, "Orchestration completed successfully")
-            else:
-                self.progress_update.emit("Orchestration completed with errors")
-                self.orchestration_complete.emit(False, "Orchestration completed with errors")
-        except Exception as e:
-            print(f"Orchestration error in thread: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.error_message = str(e)
-            self.progress_update.emit(f"Error: {str(e)}")
-            self.orchestration_complete.emit(False, f"Error: {str(e)}")
-        finally:
-            # Always make sure to reset running flag
-            self.running = False
-    
-    def _setup_logging(self):
-        """Redirect logging to emit progress updates."""
-        import logging
-        
-        class SignalHandler(logging.Handler):
-            def __init__(self, signal):
-                super().__init__()
-                self.signal = signal
-            
-            def emit(self, record):
-                msg = self.format(record)
-                self.signal.emit(msg)
-        
-        # Get the orchestrator logger
-        logger = logging.getLogger("Orchestrator")
-        
-        # Add our custom handler
-        handler = SignalHandler(self.progress_update)
-        handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-        logger.addHandler(handler)
+from .orchestration import OrchestrationThread, TestExecutor
+from .utils import SystemInfoCollector, DatasetAnalyzer, ConfigurationHelper
 
 
 class ConfigurationTab(QWidget):
@@ -120,18 +51,18 @@ class ConfigurationTab(QWidget):
         languages_layout = QGridLayout()
         
         # Language checkboxes
-        self.lang_python_check = QCheckBox("Python")
+        self.lang_zig_check = QCheckBox("Zig")
         self.lang_c_check = QCheckBox("C")
         self.lang_rust_check = QCheckBox("Rust")
         self.lang_go_check = QCheckBox("Go")
-        self.lang_assembly_check = QCheckBox("Assembly")
+        self.lang_java_check = QCheckBox("Java")
         
         # Add checkboxes to grid
-        languages_layout.addWidget(self.lang_python_check, 0, 0)
+        languages_layout.addWidget(self.lang_zig_check, 0, 0)
         languages_layout.addWidget(self.lang_c_check, 0, 1)
         languages_layout.addWidget(self.lang_rust_check, 0, 2)
         languages_layout.addWidget(self.lang_go_check, 1, 0)
-        languages_layout.addWidget(self.lang_assembly_check, 1, 1)
+        languages_layout.addWidget(self.lang_java_check, 1, 1)
         
         # Set layout for languages group
         languages_group.setLayout(languages_layout)
@@ -182,19 +113,6 @@ class ConfigurationTab(QWidget):
         self.rsa_padding_combo.addItems(["OAEP", "PKCS#1 v1.5"])
         self.rsa_padding_combo.setCurrentText("OAEP")  # OAEP is recommended default
         rsa_layout.addWidget(self.rsa_padding_combo)
-        
-        # Add key reuse option for RSA
-        self.rsa_reuse_keys_check = QCheckBox("Reuse Keys")
-        self.rsa_reuse_keys_check.setToolTip("Generate a specific number of key pairs once and reuse them")
-        rsa_layout.addWidget(self.rsa_reuse_keys_check)
-        
-        rsa_layout.addWidget(QLabel("Key Sets:"))
-        self.rsa_key_sets_spin = QSpinBox()
-        self.rsa_key_sets_spin.setRange(1, 100)
-        self.rsa_key_sets_spin.setValue(10)  # Default to 10 sets
-        self.rsa_key_sets_spin.setEnabled(False)  # Disabled by default
-        self.rsa_key_sets_spin.setToolTip("Number of key pairs to generate and use")
-        rsa_layout.addWidget(self.rsa_key_sets_spin)
         
         rsa_layout.addStretch()
         methods_layout.addLayout(rsa_layout)
@@ -313,7 +231,7 @@ class ConfigurationTab(QWidget):
         main_layout.addWidget(scroll_area)
         
         # Default selections
-        self.lang_python_check.setChecked(True)
+        self.lang_zig_check.setChecked(True)
         self.aes_check.setChecked(True)
         
         # Connect signals
@@ -331,10 +249,6 @@ class ConfigurationTab(QWidget):
         self.aes_check.toggled.connect(lambda checked: self.aes_mode_combo.setEnabled(checked))
         self.rsa_check.toggled.connect(lambda checked: self.rsa_key_size_combo.setEnabled(checked))
         self.rsa_check.toggled.connect(lambda checked: self.rsa_padding_combo.setEnabled(checked))
-        self.rsa_check.toggled.connect(lambda checked: self.rsa_reuse_keys_check.setEnabled(checked))
-        # Only enable the key sets spinbox if both RSA is enabled and reuse keys is checked
-        self.rsa_check.toggled.connect(self._update_rsa_controls)
-        self.rsa_reuse_keys_check.toggled.connect(self._update_rsa_controls)
         self.ecc_check.toggled.connect(lambda checked: self.ecc_curve_combo.setEnabled(checked))
         self.camellia_check.toggled.connect(lambda checked: self.camellia_key_size_combo.setEnabled(checked))
         self.camellia_check.toggled.connect(lambda checked: self.camellia_mode_combo.setEnabled(checked))
@@ -351,19 +265,10 @@ class ConfigurationTab(QWidget):
         self.aes_mode_combo.setEnabled(self.aes_check.isChecked())
         self.rsa_key_size_combo.setEnabled(self.rsa_check.isChecked())
         self.rsa_padding_combo.setEnabled(self.rsa_check.isChecked())
-        self.rsa_reuse_keys_check.setEnabled(self.rsa_check.isChecked())
-        self._update_rsa_controls()
         self.ecc_curve_combo.setEnabled(self.ecc_check.isChecked())
         self.camellia_key_size_combo.setEnabled(self.camellia_check.isChecked())
         self.camellia_mode_combo.setEnabled(self.camellia_check.isChecked())
         self._update_chunk_size_visibility(self.processing_strategy_combo.currentText())
-    
-    def _update_rsa_controls(self):
-        """Update RSA controls' enabled state based on checkbox states."""
-        rsa_enabled = self.rsa_check.isChecked()
-        reuse_keys_enabled = self.rsa_reuse_keys_check.isChecked()
-        # Key sets spinbox is only enabled if both RSA is enabled and reuse keys is checked
-        self.rsa_key_sets_spin.setEnabled(rsa_enabled and reuse_keys_enabled)
     
     def _update_chunk_size_visibility(self, strategy):
         """Enable/disable chunk size selector based on processing strategy."""
@@ -386,11 +291,11 @@ class ConfigurationTab(QWidget):
         # Create config dictionary
         config = {
             "languages": {
-                "python": self.lang_python_check.isChecked(),
+                "zig": self.lang_zig_check.isChecked(),
                 "c": self.lang_c_check.isChecked(),
                 "rust": self.lang_rust_check.isChecked(),
                 "go": self.lang_go_check.isChecked(),
-                "assembly": self.lang_assembly_check.isChecked()
+                "java": self.lang_java_check.isChecked()
             },
             "encryption_methods": {
                 "aes": {
@@ -404,9 +309,7 @@ class ConfigurationTab(QWidget):
                 "rsa": {
                     "enabled": self.rsa_check.isChecked(),
                     "key_size": self.rsa_key_size_combo.currentText(),
-                    "padding": self.rsa_padding_combo.currentText(),
-                    "reuse_keys": self.rsa_reuse_keys_check.isChecked(),
-                    "key_sets": self.rsa_key_sets_spin.value()
+                    "padding": self.rsa_padding_combo.currentText()
                 },
                 "ecc": {
                     "enabled": self.ecc_check.isChecked(),
@@ -463,11 +366,11 @@ class ConfigurationTab(QWidget):
                 
                 # Update UI with loaded config
                 # Languages
-                self.lang_python_check.setChecked(config["languages"]["python"])
+                self.lang_zig_check.setChecked(config["languages"]["zig"])
                 self.lang_c_check.setChecked(config["languages"]["c"])
                 self.lang_rust_check.setChecked(config["languages"]["rust"])
                 self.lang_go_check.setChecked(config["languages"]["go"])
-                self.lang_assembly_check.setChecked(config["languages"]["assembly"])
+                self.lang_java_check.setChecked(config["languages"]["java"])
                 
                 # Encryption methods
                 self.aes_check.setChecked(config["encryption_methods"]["aes"]["enabled"])
@@ -485,17 +388,6 @@ class ConfigurationTab(QWidget):
                 else:
                     # Default to OAEP for older config files
                     self.rsa_padding_combo.setCurrentText("OAEP")
-                
-                # Handle RSA key reuse settings with backward compatibility
-                if "reuse_keys" in config["encryption_methods"]["rsa"]:
-                    self.rsa_reuse_keys_check.setChecked(config["encryption_methods"]["rsa"]["reuse_keys"])
-                else:
-                    self.rsa_reuse_keys_check.setChecked(False)
-                
-                if "key_sets" in config["encryption_methods"]["rsa"]:
-                    self.rsa_key_sets_spin.setValue(config["encryption_methods"]["rsa"]["key_sets"])
-                else:
-                    self.rsa_key_sets_spin.setValue(10)  # Default value
                 
                 self.ecc_check.setChecked(config["encryption_methods"]["ecc"]["enabled"])
                 self.ecc_curve_combo.setCurrentText(config["encryption_methods"]["ecc"]["curve"])
@@ -540,11 +432,11 @@ class ConfigurationTab(QWidget):
                 self,
                 "Orchestration in Progress",
                 "An orchestration process is already running. Do you want to stop it and start a new one?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
             )
             
-            if reply == QMessageBox.Yes:
+            if reply == QMessageBox.StandardButton.Yes:
                 # Properly terminate the thread
                 self.orchestrator_thread.terminate()
                 self.orchestrator_thread.wait(3000)  # Wait up to 3 seconds for clean termination
@@ -559,16 +451,33 @@ class ConfigurationTab(QWidget):
             else:
                 return
         
+        # Validation checks
+        if not self._validate_selections():
+            return
+        
+        # Get dataset information
+        dataset_path, dataset_info, dataset_sample = self._get_dataset_information()
+        if not dataset_path:
+            return
+        
+        # Create session and configuration
+        config_path = self._create_session_config(dataset_path, dataset_info, dataset_sample)
+        
+        # Execute tests
+        self._execute_tests(config_path)
+    
+    def _validate_selections(self):
+        """Validate user selections."""
         # Check if at least one language is selected
         if not any([
-            self.lang_python_check.isChecked(),
+            self.lang_zig_check.isChecked(),
             self.lang_c_check.isChecked(),
             self.lang_rust_check.isChecked(),
             self.lang_go_check.isChecked(),
-            self.lang_assembly_check.isChecked()
+            self.lang_java_check.isChecked()
         ]):
             QMessageBox.warning(self, "Warning", "Please select at least one programming language.")
-            return
+            return False
         
         # Check if at least one encryption method is selected
         if not any([
@@ -579,14 +488,17 @@ class ConfigurationTab(QWidget):
             self.camellia_check.isChecked()
         ]):
             QMessageBox.warning(self, "Warning", "Please select at least one encryption method.")
-            return
+            return False
         
         # Check if at least one implementation option is selected
         if not self.use_stdlib_check.isChecked() and not self.use_custom_check.isChecked():
             QMessageBox.warning(self, "Warning", "Please select at least one implementation option (Standard Library or Custom).")
-            return
+            return False
         
-        # Get dataset information - safer approach to find the dataset tab
+        return True
+    
+    def _get_dataset_information(self):
+        """Get dataset information from the dataset tab."""
         dataset_path = None
         dataset_info = {}
         dataset_sample = ""
@@ -618,19 +530,23 @@ class ConfigurationTab(QWidget):
                                 "Please select a dataset in the Dataset tab before starting the tests.")
                             self.status_message.emit("Test not started: No dataset selected")
                             print("Test not started: No dataset selected")
-                            return
+                            return None, None, None
                         
                         # If a dataset is selected, get information about it
-                        dataset_info = self._get_dataset_info(dataset_path)
-                        dataset_sample = self._get_dataset_sample(dataset_path, 200)
+                        dataset_info = DatasetAnalyzer.get_dataset_info(dataset_path)
+                        dataset_sample = DatasetAnalyzer.get_dataset_sample(dataset_path, 200)
         except Exception as e:
             # Log the error but continue without dataset information
             print(f"Error accessing dataset tab: {str(e)}")
             QMessageBox.warning(self, "Dataset Error", 
                 f"Could not access dataset information: {str(e)}\n\nPlease select a dataset in the Dataset tab.")
             self.status_message.emit("Test not started: Dataset error")
-            return
+            return None, None, None
         
+        return dataset_path, dataset_info, dataset_sample
+    
+    def _create_session_config(self, dataset_path, dataset_info, dataset_sample):
+        """Create session directory and configuration file."""
         # Format timestamp for human readability
         now = datetime.now()
         timestamp = now.strftime("%Y%m%d_%H%M%S")  # Keep original format for internal use
@@ -654,26 +570,16 @@ class ConfigurationTab(QWidget):
         os.makedirs(os.path.join(session_dir, "results"), exist_ok=True)
         
         # Collect PC specifications
-        pc_specs = self._collect_pc_specs()
+        pc_specs = SystemInfoCollector.collect_pc_specs()
         
         # Create config dictionary (enhanced with new fields)
         config = {
             "languages": {
-                "python": {
-                    "is_enabled": self.lang_python_check.isChecked()
-                },
-                "c": {
-                    "is_enabled": self.lang_c_check.isChecked()
-                },
-                "rust": {
-                    "is_enabled": self.lang_rust_check.isChecked()
-                },
-                "go": {
-                    "is_enabled": self.lang_go_check.isChecked()
-                },
-                "assembly": {
-                    "is_enabled": self.lang_assembly_check.isChecked()
-                }
+                "zig": self.lang_zig_check.isChecked(),
+                "c": self.lang_c_check.isChecked(),
+                "rust": self.lang_rust_check.isChecked(),
+                "go": self.lang_go_check.isChecked(),
+                "java": self.lang_java_check.isChecked()
             },
             "encryption_methods": {
                 "aes": {
@@ -687,9 +593,7 @@ class ConfigurationTab(QWidget):
                 "rsa": {
                     "enabled": self.rsa_check.isChecked(),
                     "key_size": self.rsa_key_size_combo.currentText(),
-                    "padding": self.rsa_padding_combo.currentText(),
-                    "reuse_keys": self.rsa_reuse_keys_check.isChecked(),
-                    "key_sets": self.rsa_key_sets_spin.value()
+                    "padding": self.rsa_padding_combo.currentText()
                 },
                 "ecc": {
                     "enabled": self.ecc_check.isChecked(),
@@ -725,79 +629,31 @@ class ConfigurationTab(QWidget):
         with open(config_path, "w") as f:
             json.dump(config, f, indent=4)
         
+        return config_path
+    
+    def _execute_tests(self, config_path):
+        """Execute the selected tests."""
         # Emit signal to indicate tests are starting
         message = f"Starting tests with configuration from {config_path}"
         self.status_message.emit(message)
         print(f"\n=== TEST SESSION STARTED ===")
         print(message)
         
-        # If Python is selected, run Python tests directly
-        if self.lang_python_check.isChecked():
-            try:
-                # Get the path to the Python test script
-                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                python_test_script = os.path.join(script_dir, "encryption", "python", "run_python_tests.sh")
-                
-                # Make sure the script is executable
-                os.chmod(python_test_script, 0o755)
-                
-                # Run the Python test script
-                message = "Running Python encryption tests..."
-                self.status_message.emit(message)
-                print(message)
-                
-                subprocess.run([python_test_script, config_path], check=True)
-                
-                # Update progress
-                message = "Python tests completed successfully"
-                self.status_message.emit(message)
-                print(message)
-            except subprocess.CalledProcessError as e:
-                error_msg = f"Python tests failed: {str(e)}"
-                self.status_message.emit(error_msg)
-                print(f"ERROR: {error_msg}")
-                QMessageBox.warning(self, "Test Error", error_msg)
-            except Exception as e:
-                error_msg = f"Error running Python tests: {str(e)}"
-                self.status_message.emit(error_msg)
-                print(f"ERROR: {error_msg}")
-                QMessageBox.warning(self, "Test Error", error_msg)
+        # Create test executor
+        executor = TestExecutor(self.status_message.emit)
         
-        # If C is selected, run C tests directly
+        # Execute tests based on selected languages
+        if self.lang_zig_check.isChecked():
+            executor.execute_zig_tests(config_path)
+        
         if self.lang_c_check.isChecked():
-            try:
-                # Get the path to the C test script
-                script_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                c_test_script = os.path.join(script_dir, "encryption", "c", "run_c_tests.sh")
-                
-                # Make sure the script is executable
-                os.chmod(c_test_script, 0o755)
-                
-                # Run the C test script
-                message = "Running C encryption tests..."
-                self.status_message.emit(message)
-                
-                subprocess.run([c_test_script, config_path], check=True)
-                
-                # Update progress
-                message = "C tests completed successfully"
-                self.status_message.emit(message)
-            except subprocess.CalledProcessError as e:
-                error_msg = f"C tests failed: {str(e)}"
-                self.status_message.emit(error_msg)
-                print(f"ERROR: {error_msg}")
-                QMessageBox.warning(self, "Test Error", error_msg)
-            except Exception as e:
-                error_msg = f"Error running C tests: {str(e)}"
-                self.status_message.emit(error_msg)
-                print(f"ERROR: {error_msg}")
-                QMessageBox.warning(self, "Test Error", error_msg)
+            executor.execute_c_tests(config_path)
         
         # For other languages, run the orchestrator
         if any([
             self.lang_rust_check.isChecked(),
             self.lang_go_check.isChecked(),
-            self.lang_assembly_check.isChecked()
+            self.lang_java_check.isChecked()
         ]):
             try:
                 # Import and run the orchestrator
@@ -836,233 +692,6 @@ class ConfigurationTab(QWidget):
         self.status_message.emit(message)
         print(message)
 
-    def _collect_pc_specs(self):
-        """Collect information about the system."""
-        specs = {
-            "cpu": {
-                "name": platform.processor() or "Unknown",
-                "architecture": platform.machine(),
-                "cores": psutil.cpu_count(logical=False),
-                "logical_cores": psutil.cpu_count(logical=True)
-            },
-            "memory": {
-                "total_ram_gb": round(psutil.virtual_memory().total / (1024 ** 3), 2),
-                "available_ram_gb": round(psutil.virtual_memory().available / (1024 ** 3), 2)
-            },
-            "os": {
-                "system": platform.system(),
-                "release": platform.release(),
-                "version": platform.version()
-            }
-        }
-        
-        # Try to get more detailed CPU information on macOS
-        if platform.system() == "Darwin":
-            try:
-                import subprocess
-                result = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], 
-                                       capture_output=True, text=True, check=True)
-                specs["cpu"]["name"] = result.stdout.strip()
-                
-                # Check if it's Apple Silicon
-                if "Apple" in specs["cpu"]["name"]:
-                    specs["cpu"]["type"] = "Apple Silicon"
-                    # Get GPU cores for Apple Silicon
-                    try:
-                        result = subprocess.run(["sysctl", "-n", "hw.perflevel0.gpu.cores"],
-                                               capture_output=True, text=True, check=True)
-                        specs["gpu"] = {"cores": int(result.stdout.strip())}
-                    except:
-                        specs["gpu"] = {"cores": "Unknown"}
-            except:
-                # Fall back to platform.processor() which was already set
-                pass
-        
-        return specs
-
-    def _get_dataset_info(self, dataset_path):
-        """Get information about the dataset."""
-        info = {
-            "file_name": os.path.basename(dataset_path),
-            "file_size_kb": round(os.path.getsize(dataset_path) / 1024, 2),
-            "content_type": "Unknown"
-        }
-        
-        # Try to determine content type by reading a bit of the file
-        try:
-            with open(dataset_path, 'r', errors='ignore') as f:
-                sample = f.read(4096)  # Read first 4KB
-                
-                # Check if sample contains various character types
-                info["has_alphabetic"] = any(c.isalpha() for c in sample)
-                info["has_digits"] = any(c.isdigit() for c in sample)
-                info["has_spaces"] = any(c.isspace() for c in sample)
-                info["has_punctuation"] = any(c in ",.;:!?-\"'()[]{}" for c in sample)
-                info["has_special_chars"] = any(not (c.isalnum() or c.isspace() or c in ",.;:!?-\"'()[]{}") for c in sample)
-                
-                # Guess the content type
-                if all(c.isdigit() or c.isspace() or c in ",.;:" for c in sample):
-                    info["content_type"] = "Numbers"
-                elif info["has_alphabetic"] and info["has_spaces"] and sample.count(".") > 0:
-                    info["content_type"] = "Sentences"
-                elif info["has_alphabetic"] and info["has_spaces"]:
-                    info["content_type"] = "Words"
-                elif info["has_alphabetic"] and not info["has_spaces"]:
-                    info["content_type"] = "Custom Char Set"
-                elif not info["has_alphabetic"] and not info["has_digits"]:
-                    info["content_type"] = "Binary"
-        except:
-            info["content_type"] = "Unknown (Could not analyze)"
-        
-        return info
-
-    def _get_dataset_sample(self, dataset_path, sample_size=200):
-        """Get a sample from the dataset that's more representative."""
-        try:
-            # Get file size
-            file_size = os.path.getsize(dataset_path)
-            
-            # Detect dataset type
-            dataset_info = self._get_dataset_info(dataset_path)
-            content_type = dataset_info["content_type"]
-
-            # First, try to detect if it's binary data
-            try:
-                with open(dataset_path, 'rb') as f:
-                    # Read small chunk to detect if it's binary
-                    header = f.read(100)
-                    
-                    # Check if this looks like binary data
-                    if b'\x00' in header or not all(32 <= b <= 126 or b in (9, 10, 13) for b in header):
-                        # This is binary data - return hexdump style sample
-                        sample = []
-                        
-                        # Sample from start
-                        with open(dataset_path, 'rb') as f:
-                            start_bytes = f.read(sample_size // 2)
-                            hex_dump = ' '.join(f'{b:02x}' for b in start_bytes)
-                            sample.append(f"Start: {hex_dump}")
-                        
-                        # Sample from middle
-                        if file_size > sample_size:
-                            middle_pos = file_size // 2
-                            with open(dataset_path, 'rb') as f:
-                                f.seek(max(0, middle_pos - sample_size // 4))
-                                mid_bytes = f.read(sample_size // 2)
-                                hex_dump = ' '.join(f'{b:02x}' for b in mid_bytes)
-                                sample.append(f"Middle: {hex_dump}")
-                        
-                        return "\n".join(sample)
-            except:
-                pass  # Fallback to text processing
-            
-            # Try to get text sample with different strategies
-            with open(dataset_path, 'r', errors='ignore') as f:
-                if content_type == "Sentences":
-                    # For sentences, try to get whole sentences
-                    content = f.read(sample_size * 20)  # Read enough for several sentences
-                    
-                    # Split by common sentence endings
-                    all_sentences = []
-                    for end_mark in [".", "!", "?"]:
-                        parts = content.split(end_mark)
-                        for part in parts[:-1]:  # Skip the last part as it might be incomplete
-                            if part.strip():  # Ensure non-empty
-                                all_sentences.append(part.strip() + end_mark)
-                    
-                    # Return a few sentences
-                    if all_sentences:
-                        sample_sentences = all_sentences[:3]  # Take first 3 sentences
-                        return " ".join(sample_sentences)
-                    else:
-                        # Fallback if no sentence endings found
-                        return content[:sample_size].strip()
-                    
-                elif content_type == "Words":
-                    # For words, ensure we don't cut words in half
-                    content = f.read(sample_size * 10)
-                    words = content.split()
-                    
-                    # Take words up to sample_size characters
-                    sample_text = ""
-                    for word in words:
-                        if len(sample_text) + len(word) + 1 <= sample_size * 2:
-                            sample_text += word + " "
-                        else:
-                            break
-                    
-                    return sample_text.strip()
-                    
-                elif content_type == "Numbers":
-                    # For numbers, try to take complete numbers
-                    content = f.read(sample_size * 5)
-                    
-                    # Check if there are spaces
-                    if " " in content:
-                        numbers = content.split()
-                        # Take numbers up to sample_size characters
-                        sample_text = ""
-                        for number in numbers:
-                            if len(sample_text) + len(number) + 1 <= sample_size * 2:
-                                sample_text += number + " "
-                            else:
-                                break
-                        return sample_text.strip()
-                    else:
-                        # No spaces, just take the raw characters
-                        return content[:sample_size]
-                
-                else:
-                    # For other types or unknown, do simple random sampling
-                    samples = []
-                    
-                    # Sample from beginning
-                    f.seek(0)
-                    samples.append(f.read(sample_size // 2))
-                    
-                    # Sample from middle if large enough
-                    if file_size > sample_size:
-                        f.seek(max(0, file_size // 2 - sample_size // 4))
-                        samples.append(f.read(sample_size // 2))
-                    
-                    return " ... ".join(samples)
-                    
-        except Exception as e:
-            return f"Could not read sample from dataset: {str(e)}"
-
-    def _generate_test_params(self):
-        """Generate test parameters from current UI state."""
-        params = {
-            "iterations": self.iterations_spin.value(),
-            "processing_strategy": self.processing_strategy_combo.currentText(),
-            "chunk_size": self.chunk_size_combo.currentText(),
-            "use_stdlib": self.use_stdlib_check.isChecked(),
-            "use_custom": self.use_custom_check.isChecked(),
-            "ram_limit": ram_limit,
-            "dataset_path": self.dataset_combo.currentData(),
-            "encryption_settings": {
-                "aes": {
-                    "key_size": self.aes_key_size_combo.currentText(),
-                    "mode": self.aes_mode_combo.currentText()
-                },
-                "chacha20": {},
-                "rsa": {
-                    "key_size": self.rsa_key_size_combo.currentText(),
-                    "padding": self.rsa_padding_combo.currentText(),
-                    "reuse_keys": self.rsa_reuse_keys_check.isChecked(),
-                    "key_sets": self.rsa_key_sets_spin.value() if self.rsa_reuse_keys_check.isChecked() else 1
-                },
-                "ecc": {
-                    "curve": self.ecc_curve_combo.currentText()
-                },
-                "camellia": {
-                    "key_size": self.camellia_key_size_combo.currentText(),
-                    "mode": self.camellia_mode_combo.currentText()
-                }
-            }
-        }
-        return params
-
     def _orchestration_finished(self):
         """Handle thread finished signal (always called)."""
         # Clean up any temporary files
@@ -1086,4 +715,8 @@ class ConfigurationTab(QWidget):
             print(f"\n=== TEST SESSION FAILED ===")
             print(error_message)
             QMessageBox.warning(self, "Orchestration Error", 
-                               f"Benchmarking encountered an error:\n\n{message}") 
+                               f"Benchmarking encountered an error:\n\n{message}")
+
+
+# Export the main class
+__all__ = ['ConfigurationTab'] 

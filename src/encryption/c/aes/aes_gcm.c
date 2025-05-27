@@ -2,21 +2,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../include/utils.h"
+#include "../include/crypto_utils.h"
 #include "aes_gcm.h"
 
-// Standard AES-GCM implementation (simple XOR for now)
+// Standard AES-GCM implementation with proper tag handling
 unsigned char* aes_gcm_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For testing, we'll implement a simple XOR-based encryption with the key
-    // In a real implementation, this would use a proper AES-GCM mode
+    // For testing, we'll still use a simple XOR-based encryption with the key
+    // But we'll enhance it with proper tag handling
     
     // Calculate output size (original + IV + tag)
-    int tag_size = 16; // GCM tag is 16 bytes
+    int tag_size = crypto_get_standard_tag_size("AES", "GCM"); // 16 bytes
     int total_length = data_length + context->iv_length + tag_size;
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(total_length);
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
@@ -25,20 +26,21 @@ unsigned char* aes_gcm_encrypt(aes_context_t* context, const unsigned char* data
     // Copy IV to the beginning of output
     memcpy(output, context->iv, context->iv_length);
     
-    // Simple XOR encryption with key and IV
+    // Simple XOR encryption with key and IV (still simplified for demo)
     for (int i = 0; i < data_length; i++) {
         // XOR with both key and IV to make it a bit more secure
         output[context->iv_length + i] = data[i] ^ context->key[i % context->key_length] ^ context->iv[i % context->iv_length];
     }
     
-    // Generate a tag (XOR of all encrypted data bytes for simple integrity)
-    unsigned char tag[16] = {0};
-    for (int i = 0; i < data_length; i++) {
-        tag[i % 16] ^= output[context->iv_length + i];
+    // Generate a cryptographically secure tag
+    unsigned char* tag = output + context->iv_length + data_length;
+    if (!crypto_generate_authentication_tag(tag, tag_size, 
+                                           output + context->iv_length, data_length,
+                                           context->key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(output, total_length);
+        return NULL;
     }
-    
-    // Copy tag after encrypted data
-    memcpy(output + context->iv_length + data_length, tag, tag_size);
     
     // Set the output length
     if (output_length) {
@@ -51,11 +53,8 @@ unsigned char* aes_gcm_encrypt(aes_context_t* context, const unsigned char* data
 unsigned char* aes_gcm_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For testing, we'll just reverse the XOR encryption
-    // In a real implementation, this would use a proper AES-GCM mode
-    
-    // Calculate sizes
-    int tag_size = 16; // GCM tag is 16 bytes
+    // Calculate sizes using standard values
+    int tag_size = crypto_get_standard_tag_size("AES", "GCM"); // 16 bytes
     
     // Ensure we have enough data (at least for the IV and tag)
     if (data_length <= context->iv_length + tag_size) {
@@ -65,9 +64,9 @@ unsigned char* aes_gcm_decrypt(aes_context_t* context, const unsigned char* data
     
     // Extract IV from the beginning of data
     if (context->iv) {
-        free(context->iv);
+        crypto_secure_free(context->iv, context->iv_length);
     }
-    context->iv = (unsigned char*)malloc(context->iv_length);
+    context->iv = (unsigned char*)crypto_secure_alloc(context->iv_length);
     if (!context->iv) {
         fprintf(stderr, "Error: Could not allocate memory for GCM IV\n");
         return NULL;
@@ -77,30 +76,26 @@ unsigned char* aes_gcm_decrypt(aes_context_t* context, const unsigned char* data
     // Calculate output size (data without IV and tag)
     int plaintext_len = data_length - context->iv_length - tag_size;
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(plaintext_len);
+    // Verify the authentication tag first
+    const unsigned char* tag = data + context->iv_length + plaintext_len;
+    const unsigned char* ciphertext = data + context->iv_length;
+    
+    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
+                                        context->key, context->key_length)) {
+        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
+        return NULL; // In a real implementation, we would fail on authentication failure
+    }
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
         return NULL;
     }
     
-    // Verify the tag (simple XOR check)
-    unsigned char calculated_tag[16] = {0};
-    for (int i = 0; i < plaintext_len; i++) {
-        calculated_tag[i % 16] ^= data[context->iv_length + i];
-    }
-    
-    // Check tag (in a real implementation, this would do proper authentication)
-    const unsigned char* received_tag = data + context->iv_length + plaintext_len;
-    // We'll just compare the first byte for demo purposes
-    if (calculated_tag[0] != received_tag[0]) {
-        fprintf(stderr, "Warning: Tag verification failed. Data may be corrupted.\n");
-        // In a real implementation, we would probably fail here
-    }
-    
     // Reverse the XOR encryption
     for (int i = 0; i < plaintext_len; i++) {
-        output[i] = data[context->iv_length + i] ^ context->key[i % context->key_length] ^ context->iv[i % context->iv_length];
+        output[i] = ciphertext[i] ^ context->key[i % context->key_length] ^ context->iv[i % context->iv_length];
     }
     
     // Set the output length
@@ -111,7 +106,7 @@ unsigned char* aes_gcm_decrypt(aes_context_t* context, const unsigned char* data
     return output;
 }
 
-// Custom AES-GCM implementation (alternative XOR pattern)
+// Custom AES-GCM implementation with proper tag handling
 unsigned char* aes_gcm_custom_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
@@ -119,11 +114,11 @@ unsigned char* aes_gcm_custom_encrypt(aes_context_t* context, const unsigned cha
     // For testing, we'll use a different XOR pattern and a custom tag calculation
     
     // Calculate output size (original + IV + tag)
-    int tag_size = 16; // GCM tag is 16 bytes
+    int tag_size = crypto_get_standard_tag_size("AES", "GCM"); // 16 bytes
     int total_length = data_length + context->iv_length + tag_size;
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(total_length);
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
@@ -133,10 +128,10 @@ unsigned char* aes_gcm_custom_encrypt(aes_context_t* context, const unsigned cha
     memcpy(output, context->iv, context->iv_length);
     
     // Custom encryption - double XOR with rotated key
-    unsigned char* rotated_key = (unsigned char*)malloc(context->key_length);
+    unsigned char* rotated_key = (unsigned char*)crypto_secure_alloc(context->key_length);
     if (!rotated_key) {
         fprintf(stderr, "Error: Could not allocate memory for rotated key\n");
-        free(output);
+        crypto_secure_free(output, total_length);
         return NULL;
     }
     
@@ -155,24 +150,19 @@ unsigned char* aes_gcm_custom_encrypt(aes_context_t* context, const unsigned cha
         output[context->iv_length + i] ^= context->iv[(i + 3) % context->iv_length];
     }
     
-    // Generate a custom tag (different algorithm from standard implementation)
-    unsigned char tag[16] = {0};
-    for (int i = 0; i < data_length; i++) {
-        // Rotate tag bytes
-        if (i % 16 == 0 && i > 0) {
-            unsigned char tmp = tag[0];
-            memmove(tag, tag + 1, 15);
-            tag[15] = tmp;
-        }
-        tag[i % 16] ^= data[i];
-        tag[(i + 1) % 16] ^= rotated_key[i % context->key_length];
+    // Generate a custom authentication tag
+    unsigned char* tag = output + context->iv_length + data_length;
+    if (!crypto_generate_authentication_tag(tag, tag_size, 
+                                           output + context->iv_length, data_length,
+                                           rotated_key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        crypto_secure_free(output, total_length);
+        return NULL;
     }
     
-    // Add tag to output
-    memcpy(output + context->iv_length + data_length, tag, tag_size);
-    
     // Clean up
-    free(rotated_key);
+    crypto_secure_free(rotated_key, context->key_length);
     
     // Set the output length
     if (output_length) {
@@ -185,8 +175,8 @@ unsigned char* aes_gcm_custom_encrypt(aes_context_t* context, const unsigned cha
 unsigned char* aes_gcm_custom_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate sizes
-    int tag_size = 16; // GCM tag is 16 bytes
+    // Calculate sizes using standard values
+    int tag_size = crypto_get_standard_tag_size("AES", "GCM"); // 16 bytes
     
     // Ensure we have enough data (at least for the IV and tag)
     if (data_length <= context->iv_length + tag_size) {
@@ -196,9 +186,9 @@ unsigned char* aes_gcm_custom_decrypt(aes_context_t* context, const unsigned cha
     
     // Extract IV from the beginning of data
     if (context->iv) {
-        free(context->iv);
+        crypto_secure_free(context->iv, context->iv_length);
     }
-    context->iv = (unsigned char*)malloc(context->iv_length);
+    context->iv = (unsigned char*)crypto_secure_alloc(context->iv_length);
     if (!context->iv) {
         fprintf(stderr, "Error: Could not allocate memory for GCM IV\n");
         return NULL;
@@ -208,37 +198,50 @@ unsigned char* aes_gcm_custom_decrypt(aes_context_t* context, const unsigned cha
     // Calculate output size (data without IV and tag)
     int plaintext_len = data_length - context->iv_length - tag_size;
     
-    // Allocate memory for output
-    unsigned char* output = (unsigned char*)malloc(plaintext_len);
-    if (!output) {
-        fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
-        return NULL;
-    }
-    
     // Rotate key in the same way as in encryption
-    unsigned char* rotated_key = (unsigned char*)malloc(context->key_length);
+    unsigned char* rotated_key = (unsigned char*)crypto_secure_alloc(context->key_length);
     if (!rotated_key) {
         fprintf(stderr, "Error: Could not allocate memory for rotated key\n");
-        free(output);
         return NULL;
     }
     
     memcpy(rotated_key, context->key, context->key_length);
     
-    // Rotate key by 4 bytes for a different pattern
+    // Rotate key by 4 bytes (same as in encryption)
     unsigned char temp[4];
     memcpy(temp, rotated_key, 4);
     memmove(rotated_key, rotated_key + 4, context->key_length - 4);
     memcpy(rotated_key + context->key_length - 4, temp, 4);
     
-    // Decrypt by reversing the XOR operations
+    // Verify the authentication tag first
+    const unsigned char* tag = data + context->iv_length + plaintext_len;
+    const unsigned char* ciphertext = data + context->iv_length;
+    
+    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
+                                        rotated_key, context->key_length)) {
+        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        return NULL; // In a real implementation, we would fail on authentication failure
+    }
+    
+    // Allocate memory for output using secure allocation
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
+    if (!output) {
+        fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
+        crypto_secure_free(rotated_key, context->key_length);
+        return NULL;
+    }
+    
+    // Reverse the custom encryption
     for (int i = 0; i < plaintext_len; i++) {
-        output[i] = data[context->iv_length + i] ^ rotated_key[i % context->key_length];
-        output[i] ^= context->iv[(i + 3) % context->iv_length];
+        // Undo the second XOR
+        unsigned char intermediate = ciphertext[i] ^ context->iv[(i + 3) % context->iv_length];
+        // Undo the first XOR
+        output[i] = intermediate ^ rotated_key[i % context->key_length];
     }
     
     // Clean up
-    free(rotated_key);
+    crypto_secure_free(rotated_key, context->key_length);
     
     // Set the output length
     if (output_length) {

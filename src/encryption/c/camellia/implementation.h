@@ -27,16 +27,16 @@ unsigned char* camellia_generate_key(void* context, int* key_length);
 unsigned char* camellia_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length);
 unsigned char* camellia_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length);
 
-// Stream processing functions
-unsigned char* camellia_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
-unsigned char* camellia_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
-
 // Custom implementation functions
 void* camellia_custom_init(void);
 void camellia_custom_cleanup(void* context);
 unsigned char* camellia_custom_generate_key(void* context, int* key_length);
 unsigned char* camellia_custom_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length);
 unsigned char* camellia_custom_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length);
+
+// Stream processing functions
+unsigned char* camellia_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
+unsigned char* camellia_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
 
 // Mode-specific implementations
 // Camellia-CBC

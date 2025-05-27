@@ -1,10 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-// Temporarily comment out OpenSSL headers for initial testing
-// #include <openssl/evp.h>
-// #include <openssl/err.h>
-// #include <openssl/rand.h>
+
 
 #include "implementation.h"
 #include "../include/utils.h"
@@ -236,24 +233,7 @@ unsigned char* aes_decrypt(void* context, const unsigned char* data, int data_le
     }
 }
 
-/**
- * Stream processing functions
- */
-unsigned char* aes_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    // For stream processing, we handle each chunk separately but maintain state across chunks if needed
-    
-    // For now, just use the regular encrypt function as a stub
-    // In a real implementation, this would maintain state across chunks for certain modes (like CBC)
-    return aes_encrypt(context, data, data_length, key, output_length);
-}
 
-unsigned char* aes_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    // For stream processing, we handle each chunk separately but maintain state across chunks if needed
-    
-    // For now, just use the regular decrypt function as a stub
-    // In a real implementation, this would maintain state across chunks for certain modes (like CBC)
-    return aes_decrypt(context, data, data_length, key, output_length);
-}
 
 // Custom implementation functions
 void* aes_custom_init(void) {
@@ -363,9 +343,24 @@ unsigned char* aes_custom_decrypt(void* context, const unsigned char* data, int 
     }
 }
 
-// Remove all the mode-specific implementations starting at line 425
-// Delete from:
-// Mode-specific implementations - temporarily just placeholders
+/**
+ * Stream processing functions
+ */
+unsigned char* aes_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
+    // For stream processing, we handle each chunk separately but maintain state across chunks if needed
+    
+    // In a real implementation, this would maintain state across chunks for certain modes (like CBC)
+    return aes_encrypt(context, data, data_length, key, output_length);
+}
+
+unsigned char* aes_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
+    // For stream processing, we handle each chunk separately but maintain state across chunks if needed
+    
+    // In a real implementation, this would maintain state across chunks for certain modes (like CBC)
+    return aes_decrypt(context, data, data_length, key, output_length);
+}
+
+
 // AES-CBC
 // unsigned char* aes_cbc_encrypt(...) 
 // through:

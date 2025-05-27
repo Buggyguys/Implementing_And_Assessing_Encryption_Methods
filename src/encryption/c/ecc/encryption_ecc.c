@@ -12,6 +12,7 @@
 
 #include "implementation.h"
 #include "../include/utils.h"
+#include "../include/crypto_utils.h"
 #include "ecc_common.h"
 #include "ecc_key.h"
 
@@ -19,6 +20,7 @@
 #define AES_KEY_SIZE 32  // 256 bits for AES symmetric key
 #define AES_BLOCK_SIZE 16
 #define AES_IV_SIZE 16
+#define AUTH_TAG_SIZE 16 // 16 bytes (128 bits) for authentication tag
 
 // ECIES (Elliptic Curve Integrated Encryption Scheme) for hybrid encryption
 unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
@@ -93,7 +95,7 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
     // Compute shared secret using ECDH
     const EC_GROUP* group = EC_KEY_get0_group(ephemeral_key);
     shared_secret_length = (EC_GROUP_get_degree(group) + 7) / 8;
-    shared_secret = (unsigned char*)malloc(shared_secret_length);
+    shared_secret = (unsigned char*)crypto_secure_alloc(shared_secret_length);
     if (!shared_secret) {
         fprintf(stderr, "Error: Memory allocation failed for shared secret\n");
         EC_KEY_free(ephemeral_key);
@@ -108,7 +110,7 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
         fprintf(stderr, "Error: ECDH key computation failed\n");
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
         return NULL;
     }
     
@@ -119,11 +121,20 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
         fprintf(stderr, "Error: Could not create message digest context\n");
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
         return NULL;
     }
     
-    unsigned char aes_key[AES_KEY_SIZE];
+    unsigned char* aes_key = (unsigned char*)crypto_secure_alloc(AES_KEY_SIZE);
+    if (!aes_key) {
+        fprintf(stderr, "Error: Could not allocate memory for AES key\n");
+        EVP_MD_CTX_free(md_ctx);
+        EC_KEY_free(ephemeral_key);
+        free(ephemeral_pubkey);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        return NULL;
+    }
+    
     unsigned int aes_key_length = AES_KEY_SIZE;
     
     if (EVP_DigestInit_ex(md_ctx, EVP_sha256(), NULL) != 1 ||
@@ -134,19 +145,31 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
         EVP_MD_CTX_free(md_ctx);
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
         return NULL;
     }
     
     EVP_MD_CTX_free(md_ctx);
     
-    // Generate random IV
-    unsigned char iv[AES_IV_SIZE];
-    if (RAND_bytes(iv, AES_IV_SIZE) != 1) {
+    // Generate random IV using secure random generation
+    unsigned char* iv = (unsigned char*)crypto_secure_alloc(AES_IV_SIZE);
+    if (!iv) {
+        fprintf(stderr, "Error: Could not allocate memory for IV\n");
+        EC_KEY_free(ephemeral_key);
+        free(ephemeral_pubkey);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        return NULL;
+    }
+    
+    if (!crypto_random_bytes(iv, AES_IV_SIZE)) {
         fprintf(stderr, "Error: Failed to generate random IV\n");
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
         return NULL;
     }
     
@@ -156,7 +179,9 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
         fprintf(stderr, "Error: Could not create AES context\n");
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
         return NULL;
     }
     
@@ -165,19 +190,23 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
         EVP_CIPHER_CTX_free(aes_ctx);
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
         return NULL;
     }
     
     // Allocate memory for encrypted data (include space for padding)
     int max_encrypt_len = data_length + AES_BLOCK_SIZE;
-    unsigned char* encrypted_data = (unsigned char*)malloc(max_encrypt_len);
+    unsigned char* encrypted_data = (unsigned char*)crypto_secure_alloc(max_encrypt_len);
     if (!encrypted_data) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         EVP_CIPHER_CTX_free(aes_ctx);
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
         return NULL;
     }
     
@@ -187,11 +216,13 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
     
     if (EVP_EncryptUpdate(aes_ctx, encrypted_data, &len, data, data_length) != 1) {
         fprintf(stderr, "Error: AES encryption failed\n");
-        free(encrypted_data);
+        crypto_secure_free(encrypted_data, max_encrypt_len);
         EVP_CIPHER_CTX_free(aes_ctx);
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
         return NULL;
     }
     encrypted_data_len = len;
@@ -199,11 +230,13 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
     // Finalize encryption
     if (EVP_EncryptFinal_ex(aes_ctx, encrypted_data + len, &len) != 1) {
         fprintf(stderr, "Error: AES encryption finalization failed\n");
-        free(encrypted_data);
+        crypto_secure_free(encrypted_data, max_encrypt_len);
         EVP_CIPHER_CTX_free(aes_ctx);
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
         return NULL;
     }
     encrypted_data_len += len;
@@ -211,24 +244,51 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
     // Clean up AES context
     EVP_CIPHER_CTX_free(aes_ctx);
     
-    // Prepare final output buffer
-    // Format: [ephemeral_pubkey_len(4)][ephemeral_pubkey][iv(16)][encrypted_data_len(4)][encrypted_data]
-    *output_length = 4 + ephemeral_pubkey_len + AES_IV_SIZE + 4 + encrypted_data_len;
-    unsigned char* output = (unsigned char*)malloc(*output_length);
-    if (!output) {
-        fprintf(stderr, "Error: Could not allocate memory for output\n");
-        free(encrypted_data);
+    // Generate authentication tag
+    unsigned char* tag = (unsigned char*)crypto_secure_alloc(AUTH_TAG_SIZE);
+    if (!tag) {
+        fprintf(stderr, "Error: Could not allocate memory for authentication tag\n");
+        crypto_secure_free(encrypted_data, max_encrypt_len);
         EC_KEY_free(ephemeral_key);
         free(ephemeral_pubkey);
-        free(shared_secret);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
         return NULL;
     }
     
-    // Write ephemeral public key length (4 bytes)
-    output[0] = (ephemeral_pubkey_len >> 24) & 0xFF;
-    output[1] = (ephemeral_pubkey_len >> 16) & 0xFF;
-    output[2] = (ephemeral_pubkey_len >> 8) & 0xFF;
-    output[3] = ephemeral_pubkey_len & 0xFF;
+    if (!crypto_generate_authentication_tag(tag, AUTH_TAG_SIZE, 
+                                           encrypted_data, encrypted_data_len,
+                                           aes_key, AES_KEY_SIZE)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(tag, AUTH_TAG_SIZE);
+        crypto_secure_free(encrypted_data, max_encrypt_len);
+        EC_KEY_free(ephemeral_key);
+        free(ephemeral_pubkey);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
+        return NULL;
+    }
+    
+    // Assemble the output:
+    // Format: [ephemeral_pubkey_len(4)][ephemeral_pubkey][iv(16)][encrypted_data_len(4)][encrypted_data][tag(16)]
+    int total_length = 4 + ephemeral_pubkey_len + AES_IV_SIZE + 4 + encrypted_data_len + AUTH_TAG_SIZE;
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
+    if (!output) {
+        fprintf(stderr, "Error: Could not allocate memory for output\n");
+        crypto_secure_free(tag, AUTH_TAG_SIZE);
+        crypto_secure_free(encrypted_data, max_encrypt_len);
+        EC_KEY_free(ephemeral_key);
+        free(ephemeral_pubkey);
+        crypto_secure_free(shared_secret, shared_secret_length);
+        crypto_secure_free(aes_key, AES_KEY_SIZE);
+        crypto_secure_free(iv, AES_IV_SIZE);
+        return NULL;
+    }
+    
+    // Write ephemeral public key length
+    *(int*)output = ephemeral_pubkey_len;
     
     // Write ephemeral public key
     memcpy(output + 4, ephemeral_pubkey, ephemeral_pubkey_len);
@@ -236,21 +296,28 @@ unsigned char* ecc_encrypt(void* context, const unsigned char* data, int data_le
     // Write IV
     memcpy(output + 4 + ephemeral_pubkey_len, iv, AES_IV_SIZE);
     
-    // Write encrypted data length (4 bytes)
-    int offset = 4 + ephemeral_pubkey_len + AES_IV_SIZE;
-    output[offset] = (encrypted_data_len >> 24) & 0xFF;
-    output[offset + 1] = (encrypted_data_len >> 16) & 0xFF;
-    output[offset + 2] = (encrypted_data_len >> 8) & 0xFF;
-    output[offset + 3] = encrypted_data_len & 0xFF;
+    // Write encrypted data length
+    *(int*)(output + 4 + ephemeral_pubkey_len + AES_IV_SIZE) = encrypted_data_len;
     
     // Write encrypted data
-    memcpy(output + offset + 4, encrypted_data, encrypted_data_len);
+    memcpy(output + 4 + ephemeral_pubkey_len + AES_IV_SIZE + 4, encrypted_data, encrypted_data_len);
+    
+    // Write authentication tag
+    memcpy(output + 4 + ephemeral_pubkey_len + AES_IV_SIZE + 4 + encrypted_data_len, tag, AUTH_TAG_SIZE);
     
     // Clean up
-    free(encrypted_data);
+    crypto_secure_free(tag, AUTH_TAG_SIZE);
+    crypto_secure_free(encrypted_data, max_encrypt_len);
     EC_KEY_free(ephemeral_key);
-    free(ephemeral_pubkey);
-    free(shared_secret);
+    free(ephemeral_pubkey); // This was allocated by ecc_export_public_key which used malloc
+    crypto_secure_free(shared_secret, shared_secret_length);
+    crypto_secure_free(aes_key, AES_KEY_SIZE);
+    crypto_secure_free(iv, AES_IV_SIZE);
+    
+    // Set output length
+    if (output_length) {
+        *output_length = total_length;
+    }
     
     return output;
 }

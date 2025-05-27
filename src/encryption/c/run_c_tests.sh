@@ -164,7 +164,7 @@ echo "Build successful."
 echo ""
 
 # Define possible executable paths
-LOCAL_EXECUTABLE="$SCRIPT_DIR/c_core"
+LOCAL_EXECUTABLE="$SCRIPT_DIR/build/c_core"
 BUILD_EXECUTABLE="$BUILD_DIR/c_encryption_benchmark"
 
 # Run the built C program with the specified configuration

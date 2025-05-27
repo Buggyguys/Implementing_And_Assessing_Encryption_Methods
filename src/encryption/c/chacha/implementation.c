@@ -6,6 +6,7 @@
 
 #include "implementation.h"
 #include "../include/utils.h"
+#include "../include/crypto_utils.h"
 #include "chacha_common.h"
 #include "chacha_key.h"
 
@@ -113,41 +114,45 @@ unsigned char* chacha_generate_key(void* context, int* key_length) {
     // ChaCha20 uses 32-byte (256-bit) keys
     *key_length = 32;
     
-    // Allocate key memory
-    unsigned char* key = (unsigned char*)malloc(*key_length);
+    // Allocate key memory using secure allocation
+    unsigned char* key = (unsigned char*)crypto_secure_alloc(*key_length);
     if (!key) {
         fprintf(stderr, "Error: Could not allocate memory for ChaCha20 key\n");
         return NULL;
     }
     
-    // Generate random key
-    unsigned int seed = (unsigned int)time(NULL);
-    srand(seed);
-    for (int i = 0; i < *key_length; i++) {
-        key[i] = rand() % 256;
+    // Generate random key using cryptographically secure function
+    if (!crypto_generate_key(key, *key_length)) {
+        fprintf(stderr, "Error: Failed to generate ChaCha20 key\n");
+        crypto_secure_free(key, *key_length);
+        return NULL;
     }
     
     // Store key in context
     if (chacha_context->key) {
-        free(chacha_context->key);
+        crypto_secure_free(chacha_context->key, chacha_context->key_length);
     }
     
-    chacha_context->key = (unsigned char*)malloc(*key_length);
+    chacha_context->key = (unsigned char*)crypto_secure_alloc(*key_length);
     if (chacha_context->key) {
         memcpy(chacha_context->key, key, *key_length);
         chacha_context->key_length = *key_length;
     }
     
-    // Generate 12-byte (96-bit) nonce
-    chacha_context->nonce_length = 12;
+    // Generate 12-byte (96-bit) nonce using standard size for ChaCha20
+    chacha_context->nonce_length = crypto_get_standard_iv_size("ChaCha20", "");
     if (chacha_context->nonce) {
-        free(chacha_context->nonce);
+        crypto_secure_free(chacha_context->nonce, chacha_context->nonce_length);
     }
     
-    chacha_context->nonce = (unsigned char*)malloc(chacha_context->nonce_length);
+    chacha_context->nonce = (unsigned char*)crypto_secure_alloc(chacha_context->nonce_length);
     if (chacha_context->nonce) {
-        for (int i = 0; i < chacha_context->nonce_length; i++) {
-            chacha_context->nonce[i] = rand() % 256;
+        if (!crypto_generate_nonce(chacha_context->nonce, chacha_context->nonce_length)) {
+            fprintf(stderr, "Error: Failed to generate ChaCha20 nonce\n");
+            crypto_secure_free(chacha_context->key, chacha_context->key_length);
+            crypto_secure_free(key, *key_length);
+            chacha_context->key = NULL;
+            return NULL;
         }
     }
     
@@ -276,7 +281,7 @@ unsigned char* chacha_encrypt_stream(void* context, const unsigned char* data, i
         return NULL;
     }
     
-    // Set output length (same as input for subsequent chunks)
+    // Set output length (data without nonce for subsequent chunks)
     *output_length = data_length;
     unsigned char* output = (unsigned char*)malloc(*output_length);
     if (!output) {
@@ -296,58 +301,14 @@ unsigned char* chacha_encrypt_stream(void* context, const unsigned char* data, i
 unsigned char* chacha_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    chacha_context_t* chacha_context = (chacha_context_t*)context;
-    
-    // For the first chunk, we extract the nonce
+    // For the first chunk, use regular decryption (which extracts the nonce)
     if (chunk_index == 0) {
-        if (data_length <= chacha_context->nonce_length) {
-            fprintf(stderr, "Error: First chunk too small for ChaCha20 decryption\n");
-            return NULL;
-        }
-        
-        // Extract nonce from the first 12 bytes of data
-        if (chacha_context->nonce) {
-            free(chacha_context->nonce);
-        }
-        
-        chacha_context->nonce_length = 12;
-        chacha_context->nonce = (unsigned char*)malloc(chacha_context->nonce_length);
-        if (!chacha_context->nonce) {
-            fprintf(stderr, "Error: Could not allocate memory for ChaCha20 nonce\n");
-            return NULL;
-        }
-        
-        memcpy(chacha_context->nonce, data, chacha_context->nonce_length);
-        
-        // Make sure we have a key
-        unsigned char* active_key = NULL;
-        if (key) {
-            active_key = (unsigned char*)key;
-        } else if (chacha_context->key) {
-            active_key = chacha_context->key;
-        } else {
-            fprintf(stderr, "Error: No key available for ChaCha20\n");
-            return NULL;
-        }
-        
-        // Set output length (data without nonce)
-        *output_length = data_length - chacha_context->nonce_length;
-        unsigned char* output = (unsigned char*)malloc(*output_length);
-        if (!output) {
-            fprintf(stderr, "Error: Could not allocate memory for ChaCha20 output\n");
-            return NULL;
-        }
-        
-        // Simple XOR decryption for demonstration
-        for (int i = 0; i < *output_length; i++) {
-            int key_idx = i % chacha_context->key_length;
-            output[i] = data[chacha_context->nonce_length + i] ^ active_key[key_idx];
-        }
-        
-        return output;
+        return chacha_decrypt(context, data, data_length, key, output_length);
     }
     
-    // For subsequent chunks, we just decrypt without nonce extraction
+    // For subsequent chunks, we don't have a nonce prefix
+    chacha_context_t* chacha_context = (chacha_context_t*)context;
+    
     // Make sure we have a key
     unsigned char* active_key = NULL;
     if (key) {
@@ -368,7 +329,7 @@ unsigned char* chacha_decrypt_stream(void* context, const unsigned char* data, i
     }
     
     // Simple XOR decryption for demonstration
-    for (int i = 0; i < data_length; i++) {
+    for (int i = 0; i < *output_length; i++) {
         int key_idx = i % chacha_context->key_length;
         output[i] = data[i] ^ active_key[key_idx];
     }
@@ -404,17 +365,19 @@ unsigned char* chacha_custom_generate_key(void* context, int* key_length) {
 }
 
 unsigned char* chacha_custom_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
-    return chacha_encrypt(context, data, data_length, key, output_length); // Use same encryption
+    return chacha_encrypt(context, data, data_length, key, output_length);
 }
 
 unsigned char* chacha_custom_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
-    return chacha_decrypt(context, data, data_length, key, output_length); // Use same decryption
+    return chacha_decrypt(context, data, data_length, key, output_length);
 }
 
 unsigned char* chacha_custom_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    return chacha_encrypt_stream(context, data, data_length, key, chunk_index, output_length); // Use same stream encryption
+    return chacha_encrypt_stream(context, data, data_length, key, chunk_index, output_length);
 }
 
 unsigned char* chacha_custom_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    return chacha_decrypt_stream(context, data, data_length, key, chunk_index, output_length); // Use same stream decryption
-} 
+    return chacha_decrypt_stream(context, data, data_length, key, chunk_index, output_length);
+}
+
+ 
