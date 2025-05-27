@@ -88,8 +88,21 @@ void* aes_init(void) {
     }
     
     memset(context, 0, sizeof(aes_context_t));
-    context->key_size = 256;
-    strcpy(context->mode, "GCM");
+    
+    // Get configuration from environment variables
+    char* key_size_str = getenv("AES_KEY_SIZE");
+    char* mode_str = getenv("AES_MODE");
+    
+    // Set key size from environment or default to 256
+    context->key_size = key_size_str ? atoi(key_size_str) : 256;
+    
+    // Set mode from environment or default to GCM
+    if (mode_str) {
+        strncpy(context->mode, mode_str, sizeof(context->mode) - 1);
+    } else {
+        strcpy(context->mode, "GCM");
+    }
+    
     context->is_custom = 0;
     context->key = NULL;
     context->key_length = 0;
@@ -244,8 +257,21 @@ void* aes_custom_init(void) {
     }
     
     memset(context, 0, sizeof(aes_context_t));
-    context->key_size = 256;
-    strcpy(context->mode, "GCM");
+    
+    // Get configuration from environment variables
+    char* key_size_str = getenv("AES_KEY_SIZE");
+    char* mode_str = getenv("AES_MODE");
+    
+    // Set key size from environment or default to 256
+    context->key_size = key_size_str ? atoi(key_size_str) : 256;
+    
+    // Set mode from environment or default to GCM
+    if (mode_str) {
+        strncpy(context->mode, mode_str, sizeof(context->mode) - 1);
+    } else {
+        strcpy(context->mode, "GCM");
+    }
+    
     context->is_custom = 1;
     context->key = NULL;
     context->key_length = 0;

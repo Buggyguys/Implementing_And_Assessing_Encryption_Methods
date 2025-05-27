@@ -35,7 +35,7 @@ CONFIG_FILE="$1"
 if [ -f "$CONFIG_FILE" ]; then
     # Extract AES key size and mode from the encryption_methods.aes section
     AES_KEY_SIZE=$(grep -A10 '"aes": {' "$CONFIG_FILE" | grep -o '"key_size": *"[^"]*"' | grep -o '[0-9]\+' | head -1)
-    AES_MODE=$(grep -A10 '"aes": {' "$CONFIG_FILE" | grep -o '"mode": *"[^"]*"' | grep -o '[^"]*"' | sed 's/"$//' | head -1)
+    AES_MODE=$(grep -A10 '"aes": {' "$CONFIG_FILE" | grep '"mode"' | sed 's/.*"mode": *"\([^"]*\)".*/\1/' | head -1)
     
     # Extract if encryption methods are enabled
     AES_ENABLED=$(grep -A10 '"aes": {' "$CONFIG_FILE" | grep -o '"enabled": *\(true\|false\)' | grep -o '\(true\|false\)' | head -1)
@@ -74,6 +74,10 @@ if [ -f "$CONFIG_FILE" ]; then
     else
         CAMELLIA_ENABLED=0
     fi
+    
+    # Extract Camellia key size and mode from the encryption_methods.camellia section
+    CAMELLIA_KEY_SIZE=$(grep -A10 '"camellia": {' "$CONFIG_FILE" | grep -o '"key_size": *"[^"]*"' | grep -o '[0-9]\+' | head -1)
+    CAMELLIA_MODE=$(grep -A10 '"camellia": {' "$CONFIG_FILE" | grep '"mode"' | sed 's/.*"mode": *"\([^"]*\)".*/\1/' | head -1)
     
     # Extract RSA key size, padding, and key reuse settings
     RSA_KEY_SIZE=$(grep -A10 '"rsa": {' "$CONFIG_FILE" | grep -o '"key_size": *"[^"]*"' | grep -o '[0-9]\+' | head -1)
@@ -117,6 +121,8 @@ if [ -f "$CONFIG_FILE" ]; then
     export TEST_CONFIG_PATH="$CONFIG_FILE"
     export AES_KEY_SIZE=$AES_KEY_SIZE
     export AES_MODE=$AES_MODE
+    export CAMELLIA_KEY_SIZE=$CAMELLIA_KEY_SIZE
+    export CAMELLIA_MODE=$CAMELLIA_MODE
     export USE_STDLIB=$USE_STDLIB
     export USE_CUSTOM=$USE_CUSTOM
     
