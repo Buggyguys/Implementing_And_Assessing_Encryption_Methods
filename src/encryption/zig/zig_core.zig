@@ -122,9 +122,11 @@ fn registerAllImplementations(allocator: Allocator, config_json: ?[]const u8) !v
     // Register ChaCha20 implementations
     try registerChaCha20Implementations(&global_registry, config_json, allocator);
     
+    // Register RSA implementations
+    try registerRsaImplementations(&global_registry, config_json, allocator);
+    
     // Register other implementations (placeholders for now)
     // try registerCamelliaImplementations(&global_registry);
-    // try registerRsaImplementations(&global_registry);
     // try registerEccImplementations(&global_registry);
 }
 
@@ -134,6 +136,9 @@ const aes_impl = @import("aes/implementation.zig");
 // Import ChaCha20 implementation
 const chacha20_impl = @import("chacha20/implementation.zig");
 
+// Import RSA implementation
+const rsa_impl = @import("rsa/implementation.zig");
+
 // Register AES implementations
 fn registerAesImplementations(registry: *ImplementationRegistry, config_json: ?[]const u8, allocator: Allocator) !void {
     try aes_impl.registerAesImplementations(registry, config_json, allocator);
@@ -142,6 +147,11 @@ fn registerAesImplementations(registry: *ImplementationRegistry, config_json: ?[
 // Register ChaCha20 implementations
 fn registerChaCha20Implementations(registry: *ImplementationRegistry, config_json: ?[]const u8, allocator: Allocator) !void {
     try chacha20_impl.registerChaCha20Implementations(registry, config_json, allocator);
+}
+
+// Register RSA implementations
+fn registerRsaImplementations(registry: *ImplementationRegistry, config_json: ?[]const u8, allocator: Allocator) !void {
+    try rsa_impl.registerRsaImplementations(registry, config_json, allocator);
 }
 
 // Function to print all implementations

@@ -394,6 +394,11 @@ pub fn getAlgorithmParams(algo_name: []const u8, key_size: i32) struct { block_s
         return .{ .block_size = 16, .rounds = rounds };
     } else if (std.mem.eql(u8, algo_name, "ChaCha20")) {
         return .{ .block_size = 64, .rounds = 20 };
+    } else if (std.mem.eql(u8, algo_name, "RSA")) {
+        // For RSA, block size is the key size in bytes
+        // Rounds represent the key size in bits for RSA
+        const block_size_bytes = @divExact(key_size, 8);
+        return .{ .block_size = block_size_bytes, .rounds = key_size };
     }
     
     return .{ .block_size = 16, .rounds = 10 }; // Default
