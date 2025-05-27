@@ -148,7 +148,7 @@ def run_language_benchmark(language, config):
         
         # For C language, clean up placeholder implementations
         if language == "c":
-            clean_script_path = os.path.join(script_dir, "encryption", language, "clean_placeholders.sh")
+            clean_script_path = os.path.join(script_dir, "encryption", language, "clean.sh")
             if os.path.exists(clean_script_path):
                 os.chmod(clean_script_path, 0o755)  # Make executable
                 subprocess.run([clean_script_path], check=True)

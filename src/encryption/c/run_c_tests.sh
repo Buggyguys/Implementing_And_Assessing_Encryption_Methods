@@ -188,7 +188,7 @@ echo "------------------------------------------------------------------"
 echo "                     CLEANUP PHASE                                "
 echo "------------------------------------------------------------------"
 echo "Cleaning up placeholder implementations..."
-bash "$SCRIPT_DIR/clean_placeholders.sh"
+bash "$SCRIPT_DIR/clean.sh"
 echo ""
 
 echo "=================================================================="
