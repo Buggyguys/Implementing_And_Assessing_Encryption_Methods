@@ -399,6 +399,31 @@ pub fn getAlgorithmParams(algo_name: []const u8, key_size: i32) struct { block_s
         // Rounds represent the key size in bits for RSA
         const block_size_bytes = @divExact(key_size, 8);
         return .{ .block_size = block_size_bytes, .rounds = key_size };
+    } else if (std.mem.eql(u8, algo_name, "ECC")) {
+        // For ECC, block size is the field size in bytes
+        // Rounds represent the curve security level in bits
+        var block_size_bytes: i32 = 32; // Default for secp256r1
+        var security_bits: i32 = 256;   // Default security level
+        
+        if (key_size == 256) {
+            // secp256r1 or curve25519
+            block_size_bytes = 32;
+            security_bits = 256;
+        } else if (key_size == 384) {
+            // secp384r1
+            block_size_bytes = 48;
+            security_bits = 384;
+        } else if (key_size == 521) {
+            // secp521r1
+            block_size_bytes = 66;
+            security_bits = 521;
+        } else if (key_size == 255) {
+            // curve25519 (255-bit curve)
+            block_size_bytes = 32;
+            security_bits = 255;
+        }
+        
+        return .{ .block_size = block_size_bytes, .rounds = security_bits };
     }
     
     return .{ .block_size = 16, .rounds = 10 }; // Default

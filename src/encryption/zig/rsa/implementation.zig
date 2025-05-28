@@ -56,8 +56,8 @@ pub fn registerRsaImplementations(registry: *ImplementationRegistry, config_json
         if (json.parseFromSlice(json.Value, allocator, json_str, .{})) |parsed| {
             defer parsed.deinit();
             
-            if (parsed.value.object.get("algorithms")) |algorithms| {
-                if (algorithms.object.get("rsa")) |rsa_config| {
+            if (parsed.value.object.get("encryption_methods")) |methods| {
+                if (methods.object.get("rsa")) |rsa_config| {
                     if (rsa_config.object.get("enabled")) |enabled| {
                         if (!enabled.bool) {
                             print("RSA implementations disabled in configuration\n", .{});
