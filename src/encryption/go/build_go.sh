@@ -1,37 +1,29 @@
 #!/bin/bash
 # Build script for Go encryption implementations
 
-# Exit on error
+# Exit on any error
 set -e
 
+# Get the directory of this script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Initialize Go module if it doesn't exist
+if [ ! -f "$SCRIPT_DIR/go.mod" ]; then
+    cd "$SCRIPT_DIR"
+    go mod init encryption
+fi
+
+# Build the Go program
+echo "Building Go implementation..."
 cd "$SCRIPT_DIR"
 
-echo "Building Go encryption implementations..."
+# Remove empty custom implementation files if they exist
+find "$SCRIPT_DIR/aes" -type f -name "custom_*.go" -size 0 -delete
 
-# Check if Go is installed
-if ! command -v go &> /dev/null; then
-    echo "Go not found. Please install Go to build this implementation."
-    exit 1
-fi
+# Build the program
+go build -o "$SCRIPT_DIR/go_core" go_core.go
 
-# Initialize Go module if not already initialized
-if [ ! -f "go.mod" ]; then
-    echo "Initializing Go module..."
-    go mod init cryptobench
-    
-    # Add required dependencies
-    go get golang.org/x/crypto/aes
-    go get golang.org/x/crypto/chacha20poly1305
-    go get golang.org/x/crypto/rsa
-    go get golang.org/x/crypto/ecdh
-fi
+# Make the binary executable
+chmod +x "$SCRIPT_DIR/go_core"
 
-# Build the Go implementation
-echo "Building Go core..."
-go build -o go_core go_core.go
-
-# Set permissions
-chmod +x go_core
-
-echo "Go implementation built successfully" 
+echo "Go build completed successfully" 
