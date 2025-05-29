@@ -62,10 +62,14 @@ typedef struct {
     
     // Session directory
     char session_dir[1024];
+    
+    // AES configuration
+    char aes_key_size[16];  // "128", "192", or "256"
+    char aes_mode[16];      // "ECB", "CBC", "CTR", or "GCM"
 } TestConfig;
 
 // Function prototypes
-void register_all_implementations();
+void register_all_implementations(TestConfig* config);
 void register_aes_implementations(implementation_registry_t* registry);
 void register_camellia_implementations(implementation_registry_t* registry);
 void register_chacha_implementations(implementation_registry_t* registry);

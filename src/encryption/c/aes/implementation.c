@@ -28,7 +28,7 @@ void register_aes_implementations(implementation_registry_t* registry) {
     int key_size = key_size_str ? atoi(key_size_str) : 256;  // Default to 256
     char mode[16] = "GCM";  // Default to GCM
     int use_stdlib = use_stdlib_str ? atoi(use_stdlib_str) : 1;  // Default to true
-    int use_custom = use_custom_str ? atoi(use_custom_str) : 1;  // Default to true
+    int use_custom = use_custom_str ? atoi(use_custom_str) : 0;  // Default to false for now to match Go
     int aes_enabled = aes_enabled_str ? atoi(aes_enabled_str) : 1;  // Default to enabled
     
     // Check if AES is enabled in the configuration

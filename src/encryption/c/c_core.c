@@ -99,28 +99,34 @@ implementation_registry_t registry;
 /**
  * Initialize the registry with all available encryption implementations
  */
-void register_all_implementations() {
+void register_all_implementations(TestConfig* config) {
+    if (!config) {
+        fprintf(stderr, "Error: No test configuration provided\n");
+        return;
+    }
+
     registry.count = 0;
     
-    // Register AES implementations
-    register_aes_implementations(&registry);
-    printf("Registered %d AES implementations\n", count_implementations_by_type(&registry, ALGO_AES));
+    // Only register AES if enabled in config
+    if (config->use_stdlib) {
+        // Set environment variables for AES configuration
+        char key_size_env[32];
+        snprintf(key_size_env, sizeof(key_size_env), "%s", config->aes_key_size);
+        setenv("AES_KEY_SIZE", key_size_env, 1);
+        
+        char mode_env[32];
+        snprintf(mode_env, sizeof(mode_env), "%s", config->aes_mode);
+        setenv("AES_MODE", mode_env, 1);
+        
+        setenv("USE_STDLIB", "1", 1);
+        setenv("USE_CUSTOM", "0", 1);
+        setenv("AES_ENABLED", "1", 1);
+        
+        register_aes_implementations(&registry);
+        printf("Registered %d AES implementations\n", count_implementations_by_type(&registry, ALGO_AES));
+    }
     
-    // Register Camellia implementations
-    register_camellia_implementations(&registry);
-    printf("Registered %d Camellia implementations\n", count_implementations_by_type(&registry, ALGO_CAMELLIA));
-    
-    // Register ChaCha20 implementations
-    register_chacha_implementations(&registry);
-    printf("Registered %d ChaCha20 implementations\n", count_implementations_by_type(&registry, ALGO_CHACHA20));
-    
-    // Register RSA implementations
-    register_rsa_implementations(&registry);
-    printf("Registered %d RSA implementations\n", count_implementations_by_type(&registry, ALGO_RSA));
-    
-    // Register ECC implementations
-    register_ecc_implementations(&registry);
-    printf("Registered %d ECC implementations\n", count_implementations_by_type(&registry, ALGO_ECC));
+    // Other algorithms are disabled to match Go behavior
     
     // Log total registered implementations
     printf("Total registered implementations: %d\n", registry.count);
@@ -169,6 +175,8 @@ TestConfig* parse_config_file(const char* config_path) {
     config->memory_mode = 1;
     strcpy(config->processing_strategy, "Memory");
     strcpy(config->chunk_size, "1MB");
+    strcpy(config->aes_key_size, "256");  // Default AES key size
+    strcpy(config->aes_mode, "GCM");      // Default AES mode
     
     // Read the configuration file
     FILE* config_file = fopen(config_path, "rb");
@@ -214,7 +222,7 @@ TestConfig* parse_config_file(const char* config_path) {
         return NULL;
     }
     
-    // Extract C language configuration (we only care about C since we're the C implementation)
+    // Extract C language configuration
     cJSON* languages = cJSON_GetObjectItem(root, "languages");
     if (languages) {
         cJSON* c_lang = cJSON_GetObjectItem(languages, "c");
@@ -228,8 +236,22 @@ TestConfig* parse_config_file(const char* config_path) {
         }
     }
     
-    // Extract algorithm configurations
-    // Note: We're not using encryption_methods directly, but the values are extracted elsewhere
+    // Extract encryption methods configuration
+    cJSON* encryption_methods = cJSON_GetObjectItem(root, "encryption_methods");
+    if (encryption_methods) {
+        cJSON* aes = cJSON_GetObjectItem(encryption_methods, "aes");
+        if (aes) {
+            cJSON* key_size = cJSON_GetObjectItem(aes, "key_size");
+            if (key_size && cJSON_IsString(key_size)) {
+                strncpy(config->aes_key_size, key_size->valuestring, sizeof(config->aes_key_size) - 1);
+            }
+            
+            cJSON* mode = cJSON_GetObjectItem(aes, "mode");
+            if (mode && cJSON_IsString(mode)) {
+                strncpy(config->aes_mode, mode->valuestring, sizeof(config->aes_mode) - 1);
+            }
+        }
+    }
     
     // Extract test parameters
     cJSON* test_params = cJSON_GetObjectItem(root, "test_parameters");
@@ -766,8 +788,6 @@ void run_benchmarks(TestConfig* config) {
                 continue;
             }
             
-
-            
             // Store decryption metrics
             metrics.decrypt_time_ns = decrypt_time_ns;
             metrics.decrypt_cpu_time_ns = decrypt_diff.cpu_time_ns;
@@ -1188,8 +1208,6 @@ const char* getAlgorithmName(algorithm_type_t type) {
     }
 }
 
-
-
 /**
  * Main function
  */
@@ -1197,8 +1215,6 @@ int main(int argc, char* argv[]) {
     // Print a welcome message
     printf("C Encryption Benchmarking\n");
     printf("=========================\n");
-    
-
     
     // Check command line arguments
     if (argc < 2) {
@@ -1208,18 +1224,18 @@ int main(int argc, char* argv[]) {
     
     const char* config_path = argv[1];
     
-    // Register all implementations
-    printf("Registering C encryption implementations...\n");
-    register_all_implementations();
-    
-    // Print all registered implementations
-    print_all_implementations();
-    
-    // Parse configuration file
+    // Parse configuration file first
     TestConfig* config = parse_config_file(config_path);
     if (!config) {
         return EXIT_FAILURE;
     }
+    
+    // Register implementations based on config
+    printf("Registering C encryption implementations...\n");
+    register_all_implementations(config);
+    
+    // Print all registered implementations
+    print_all_implementations();
     
     // Run benchmarks
     run_benchmarks(config);
