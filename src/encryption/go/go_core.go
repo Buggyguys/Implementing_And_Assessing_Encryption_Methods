@@ -93,6 +93,22 @@ func runEncryptionTests(config *utils.TestConfig, results *utils.BenchmarkResult
 			}
 			log.Println("Standard AES implementation completed")
 		}
+
+		// Run custom implementation if enabled
+		if config.TestParameters.UseCustom {
+			log.Println("Running custom AES implementation...")
+			impl := &aes.CustomAES{}
+			if err := impl.Initialize(keySize, config.EncryptionMethods.AES.Mode); err != nil {
+				log.Printf("Failed to initialize custom AES: %v", err)
+				return
+			}
+			
+			if err := aes.RunAESBenchmark(impl, config, results); err != nil {
+				log.Printf("Failed to run custom AES benchmark: %v", err)
+				return
+			}
+			log.Println("Custom AES implementation completed")
+		}
 	}
 
 	if config.EncryptionMethods.ChaCha20.Enabled {
