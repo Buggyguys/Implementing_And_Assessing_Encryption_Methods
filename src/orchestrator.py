@@ -129,7 +129,27 @@ def run_language_benchmark(language, config):
                     os.chmod(executable_path, 0o755)  # Make executable
                     # Pass JSON config path to the executable
                     session_json_path = os.path.join(session_dir, "test_config.json")
-                    subprocess.run([executable_path, session_json_path], check=True)
+                    
+                    # Run with proper process management for Go
+                    if language == "go":
+                        # Use Popen for better process control
+                        process = subprocess.Popen([executable_path, session_json_path], 
+                                                 stdout=subprocess.PIPE, 
+                                                 stderr=subprocess.PIPE,
+                                                 text=True)
+                        stdout, stderr = process.communicate()
+                        
+                        if process.returncode != 0:
+                            logger.error(f"Go process failed with return code {process.returncode}")
+                            if stderr:
+                                logger.error(f"Go stderr: {stderr}")
+                            return False
+                        
+                        # Log output if needed
+                        if stdout:
+                            logger.info(f"Go stdout: {stdout}")
+                    else:
+                        subprocess.run([executable_path, session_json_path], check=True)
                 else:
                     logger.error(f"{language} core executable not found at {executable_path}")
                     return False
@@ -153,6 +173,32 @@ def run_language_benchmark(language, config):
             if os.path.exists(clean_script_path):
                 os.chmod(clean_script_path, 0o755)  # Make executable
                 subprocess.run([clean_script_path], check=True)
+        
+        # For Go language, clean up build artifacts to prevent segmentation faults
+        if language == "go":
+            logger.info(f"Cleaning up {language} build artifacts...")
+            go_dir = os.path.join(script_dir, "encryption", language)
+            try:
+                # Remove the compiled binary
+                go_binary = os.path.join(go_dir, "go_core")
+                if os.path.exists(go_binary):
+                    os.remove(go_binary)
+                
+                # Clean Go module cache and build cache
+                subprocess.run(["go", "clean", "-cache", "-modcache"], cwd=go_dir, check=False)
+                subprocess.run(["go", "clean", "-testcache"], cwd=go_dir, check=False)
+                
+                # Remove go.mod and go.sum to force fresh module initialization
+                go_mod = os.path.join(go_dir, "go.mod")
+                go_sum = os.path.join(go_dir, "go.sum")
+                if os.path.exists(go_mod):
+                    os.remove(go_mod)
+                if os.path.exists(go_sum):
+                    os.remove(go_sum)
+                    
+                logger.info(f"{language} cleanup completed")
+            except Exception as e:
+                logger.warning(f"Error during {language} cleanup: {e}")
         
         return True
     
