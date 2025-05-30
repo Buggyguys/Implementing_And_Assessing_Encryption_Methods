@@ -66,6 +66,24 @@ typedef struct {
     // AES configuration
     char aes_key_size[16];  // "128", "192", or "256"
     char aes_mode[16];      // "ECB", "CBC", "CTR", or "GCM"
+    
+    // Algorithm enabled flags
+    int aes_enabled;
+    int chacha20_enabled;
+    int rsa_enabled;
+    int ecc_enabled;
+    int camellia_enabled;
+    
+    // Algorithm-specific configurations
+    char rsa_key_size[16];
+    char rsa_padding[16];
+    int rsa_key_reuse;
+    int rsa_key_count;
+    
+    char ecc_curve[32];
+    
+    char camellia_key_size[16];
+    char camellia_mode[16];
 } TestConfig;
 
 // Function prototypes

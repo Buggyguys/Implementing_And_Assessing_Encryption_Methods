@@ -107,8 +107,8 @@ void register_all_implementations(TestConfig* config) {
 
     registry.count = 0;
     
-    // Only register AES if enabled in config
-    if (config->use_stdlib) {
+    // Register AES if enabled in config
+    if (config->aes_enabled && (config->use_stdlib || config->use_custom)) {
         // Set environment variables for AES configuration
         char key_size_env[32];
         snprintf(key_size_env, sizeof(key_size_env), "%s", config->aes_key_size);
@@ -118,15 +118,54 @@ void register_all_implementations(TestConfig* config) {
         snprintf(mode_env, sizeof(mode_env), "%s", config->aes_mode);
         setenv("AES_MODE", mode_env, 1);
         
-        setenv("USE_STDLIB", "1", 1);
-        setenv("USE_CUSTOM", "0", 1);
+        setenv("USE_STDLIB", config->use_stdlib ? "1" : "0", 1);
+        setenv("USE_CUSTOM", config->use_custom ? "1" : "0", 1);
         setenv("AES_ENABLED", "1", 1);
         
         register_aes_implementations(&registry);
         printf("Registered %d AES implementations\n", count_implementations_by_type(&registry, ALGO_AES));
     }
     
-    // Other algorithms are disabled to match Go behavior
+    // Register ChaCha20 if enabled in config
+    if (config->chacha20_enabled && (config->use_stdlib || config->use_custom)) {
+        setenv("CHACHA20_ENABLED", "1", 1);
+        setenv("USE_STDLIB", config->use_stdlib ? "1" : "0", 1);
+        setenv("USE_CUSTOM", config->use_custom ? "1" : "0", 1);
+        register_chacha_implementations(&registry);
+        printf("Registered %d ChaCha20 implementations\n", count_implementations_by_type(&registry, ALGO_CHACHA20));
+    }
+    
+    // Register RSA if enabled in config
+    if (config->rsa_enabled && (config->use_stdlib || config->use_custom)) {
+        setenv("RSA_ENABLED", "1", 1);
+        setenv("RSA_KEY_SIZE", config->rsa_key_size, 1);
+        setenv("RSA_PADDING", config->rsa_padding, 1);
+        setenv("USE_STDLIB", config->use_stdlib ? "1" : "0", 1);
+        setenv("USE_CUSTOM", config->use_custom ? "1" : "0", 1);
+        register_rsa_implementations(&registry);
+        printf("Registered %d RSA implementations\n", count_implementations_by_type(&registry, ALGO_RSA));
+    }
+    
+    // Register ECC if enabled in config
+    if (config->ecc_enabled && (config->use_stdlib || config->use_custom)) {
+        setenv("ECC_ENABLED", "1", 1);
+        setenv("ECC_CURVE", config->ecc_curve, 1);
+        setenv("USE_STDLIB", config->use_stdlib ? "1" : "0", 1);
+        setenv("USE_CUSTOM", config->use_custom ? "1" : "0", 1);
+        register_ecc_implementations(&registry);
+        printf("Registered %d ECC implementations\n", count_implementations_by_type(&registry, ALGO_ECC));
+    }
+    
+    // Register Camellia if enabled in config
+    if (config->camellia_enabled && (config->use_stdlib || config->use_custom)) {
+        setenv("CAMELLIA_ENABLED", "1", 1);
+        setenv("CAMELLIA_KEY_SIZE", config->camellia_key_size, 1);
+        setenv("CAMELLIA_MODE", config->camellia_mode, 1);
+        setenv("USE_STDLIB", config->use_stdlib ? "1" : "0", 1);
+        setenv("USE_CUSTOM", config->use_custom ? "1" : "0", 1);
+        register_camellia_implementations(&registry);
+        printf("Registered %d Camellia implementations\n", count_implementations_by_type(&registry, ALGO_CAMELLIA));
+    }
     
     // Log total registered implementations
     printf("Total registered implementations: %d\n", registry.count);
@@ -177,6 +216,20 @@ TestConfig* parse_config_file(const char* config_path) {
     strcpy(config->chunk_size, "1MB");
     strcpy(config->aes_key_size, "256");  // Default AES key size
     strcpy(config->aes_mode, "GCM");      // Default AES mode
+    
+    // Initialize algorithm defaults
+    config->aes_enabled = 0;
+    config->chacha20_enabled = 0;
+    config->rsa_enabled = 0;
+    config->ecc_enabled = 0;
+    config->camellia_enabled = 0;
+    strcpy(config->rsa_key_size, "2048");
+    strcpy(config->rsa_padding, "OAEP");
+    config->rsa_key_reuse = 0;
+    config->rsa_key_count = 1;
+    strcpy(config->ecc_curve, "P-256");
+    strcpy(config->camellia_key_size, "256");
+    strcpy(config->camellia_mode, "GCM");
     
     // Read the configuration file
     FILE* config_file = fopen(config_path, "rb");
@@ -239,8 +292,14 @@ TestConfig* parse_config_file(const char* config_path) {
     // Extract encryption methods configuration
     cJSON* encryption_methods = cJSON_GetObjectItem(root, "encryption_methods");
     if (encryption_methods) {
+        // Parse AES configuration
         cJSON* aes = cJSON_GetObjectItem(encryption_methods, "aes");
         if (aes) {
+            cJSON* enabled = cJSON_GetObjectItem(aes, "enabled");
+            if (enabled && cJSON_IsBool(enabled)) {
+                config->aes_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+            }
+            
             cJSON* key_size = cJSON_GetObjectItem(aes, "key_size");
             if (key_size && cJSON_IsString(key_size)) {
                 strncpy(config->aes_key_size, key_size->valuestring, sizeof(config->aes_key_size) - 1);
@@ -249,6 +308,67 @@ TestConfig* parse_config_file(const char* config_path) {
             cJSON* mode = cJSON_GetObjectItem(aes, "mode");
             if (mode && cJSON_IsString(mode)) {
                 strncpy(config->aes_mode, mode->valuestring, sizeof(config->aes_mode) - 1);
+            }
+        }
+        
+        // Parse ChaCha20 configuration
+        cJSON* chacha20 = cJSON_GetObjectItem(encryption_methods, "chacha20");
+        if (chacha20) {
+            cJSON* enabled = cJSON_GetObjectItem(chacha20, "enabled");
+            if (enabled && cJSON_IsBool(enabled)) {
+                config->chacha20_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+            }
+        }
+        
+        // Parse RSA configuration
+        cJSON* rsa = cJSON_GetObjectItem(encryption_methods, "rsa");
+        if (rsa) {
+            cJSON* enabled = cJSON_GetObjectItem(rsa, "enabled");
+            if (enabled && cJSON_IsBool(enabled)) {
+                config->rsa_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+            }
+            
+            cJSON* key_size = cJSON_GetObjectItem(rsa, "key_size");
+            if (key_size && cJSON_IsString(key_size)) {
+                strncpy(config->rsa_key_size, key_size->valuestring, sizeof(config->rsa_key_size) - 1);
+            }
+            
+            cJSON* padding = cJSON_GetObjectItem(rsa, "padding");
+            if (padding && cJSON_IsString(padding)) {
+                strncpy(config->rsa_padding, padding->valuestring, sizeof(config->rsa_padding) - 1);
+            }
+        }
+        
+        // Parse ECC configuration
+        cJSON* ecc = cJSON_GetObjectItem(encryption_methods, "ecc");
+        if (ecc) {
+            cJSON* enabled = cJSON_GetObjectItem(ecc, "enabled");
+            if (enabled && cJSON_IsBool(enabled)) {
+                config->ecc_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+            }
+            
+            cJSON* curve = cJSON_GetObjectItem(ecc, "curve");
+            if (curve && cJSON_IsString(curve)) {
+                strncpy(config->ecc_curve, curve->valuestring, sizeof(config->ecc_curve) - 1);
+            }
+        }
+        
+        // Parse Camellia configuration
+        cJSON* camellia = cJSON_GetObjectItem(encryption_methods, "camellia");
+        if (camellia) {
+            cJSON* enabled = cJSON_GetObjectItem(camellia, "enabled");
+            if (enabled && cJSON_IsBool(enabled)) {
+                config->camellia_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+            }
+            
+            cJSON* key_size = cJSON_GetObjectItem(camellia, "key_size");
+            if (key_size && cJSON_IsString(key_size)) {
+                strncpy(config->camellia_key_size, key_size->valuestring, sizeof(config->camellia_key_size) - 1);
+            }
+            
+            cJSON* mode = cJSON_GetObjectItem(camellia, "mode");
+            if (mode && cJSON_IsString(mode)) {
+                strncpy(config->camellia_mode, mode->valuestring, sizeof(config->camellia_mode) - 1);
             }
         }
     }
