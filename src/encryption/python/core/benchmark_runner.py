@@ -19,6 +19,91 @@ from .measurement import measure_encryption_metrics, measure_chunked_encryption
 # Setup logging
 logger = logging.getLogger("PythonCore")
 
+def get_key_size_bytes(key, implementation):
+    """
+    Helper function to get key size in bytes for different key types.
+    
+    Args:
+        key: The key object (can be various types)
+        implementation: The implementation object to get context
+        
+    Returns:
+        int: Key size in bytes
+    """
+    try:
+        # Handle tuple keys (RSA public/private key pairs)
+        if isinstance(key, tuple):
+            # RSA keys - get the key size from the public key
+            if hasattr(key[0], 'size_in_bytes'):
+                return key[0].size_in_bytes()
+            elif hasattr(key[0], 'key_size'):
+                return key[0].key_size // 8  # Convert bits to bytes
+            elif hasattr(key[0], 'n'):  # RSA key with modulus
+                # Calculate key size from modulus bit length
+                return (key[0].n.bit_length() + 7) // 8
+            else:
+                logger.warning(f"Unknown RSA key type: {type(key[0])}")
+                return 256  # Default to 2048 bits / 8 = 256 bytes
+        
+        # Handle ECC keys
+        elif hasattr(key, 'private_value') or hasattr(key, 'public_key'):  # ECC private key
+            if hasattr(key, 'key_size'):
+                return key.key_size // 8
+            elif hasattr(key, 'curve'):
+                # Determine key size from curve
+                curve_name = getattr(key.curve, 'name', '').lower()
+                if 'p256' in curve_name or 'secp256r1' in curve_name:
+                    return 32  # 256 bits / 8
+                elif 'p384' in curve_name or 'secp384r1' in curve_name:
+                    return 48  # 384 bits / 8
+                elif 'p521' in curve_name or 'secp521r1' in curve_name:
+                    return 66  # 521 bits / 8 (rounded up)
+                else:
+                    logger.warning(f"Unknown ECC curve: {curve_name}")
+                    return 32  # Default to P-256
+            else:
+                logger.warning(f"Unknown ECC key type: {type(key)}")
+                return 32  # Default to P-256
+        
+        # Handle RSA keys (single key object)
+        elif hasattr(key, 'size_in_bytes'):
+            return key.size_in_bytes()
+        elif hasattr(key, 'key_size'):
+            return key.key_size // 8  # Convert bits to bytes
+        elif hasattr(key, 'n'):  # RSA key with modulus
+            return (key.n.bit_length() + 7) // 8
+        
+        # Handle bytes/string keys (AES, ChaCha20, etc.)
+        elif hasattr(key, '__len__'):
+            return len(key)
+        
+        # Fallback - try to get from implementation name
+        else:
+            impl_name = getattr(implementation, 'name', '').lower()
+            if 'aes256' in impl_name or 'chacha20' in impl_name:
+                return 32  # 256 bits
+            elif 'aes192' in impl_name:
+                return 24  # 192 bits
+            elif 'aes128' in impl_name or 'aes' in impl_name:
+                return 16  # 128 bits
+            elif 'camellia256' in impl_name:
+                return 32
+            elif 'camellia192' in impl_name:
+                return 24
+            elif 'camellia' in impl_name:
+                return 16  # Default Camellia-128
+            elif 'rsa' in impl_name:
+                return 256  # Default to 2048 bits
+            elif 'ecc' in impl_name:
+                return 32   # Default to P-256
+            else:
+                logger.warning(f"Could not determine key size for implementation: {impl_name}")
+                return 32  # Default fallback
+                
+    except Exception as e:
+        logger.error(f"Error determining key size: {e}")
+        return 32  # Safe fallback
+
 def run_benchmarks(config, implementations):
     """
     Run all benchmarks based on the configuration.
@@ -87,37 +172,24 @@ def run_benchmarks(config, implementations):
     # Set a flag to use memory mapping for really large files
     use_mmap = False  # Disable memory mapping completely to use full in-memory loading
     
+    # Initialize variables to avoid UnboundLocalError
+    cached_dataset = None
+    memory_mapped_dataset = None
+    
     # Load dataset based on processing strategy
     if processing_strategy == "Memory":
-        # Load entire dataset into memory or use memory mapping for large files
-        logger.info(f"Loading dataset using {'memory-mapped' if use_mmap else 'full memory'} mode from {dataset_path}")
-        plaintext_data = load_dataset(dataset_path, use_mmap=use_mmap)
-        if plaintext_data is None:
+        # Memory mode: Load entire dataset
+        cached_dataset = load_dataset(dataset_path)
+        if cached_dataset is None:
             logger.error("Failed to load dataset. Aborting.")
             return False
-        
-        dataset_size_bytes = len(plaintext_data)
+        dataset_size_bytes = len(cached_dataset)
         logger.info(f"Dataset loaded successfully: {dataset_size_bytes / (1024*1024):.2f} MB")
-        
-        # Check if we're using memory mapping
-        is_memory_mapped = isinstance(plaintext_data, MemoryMappedDataset)
-        if is_memory_mapped:
-            logger.info("Using memory-mapped dataset to minimize RAM usage")
-        
-        # Log memory usage after loading dataset
-        if memory_tracking:
-            current, peak = tracemalloc.get_traced_memory()
-            logger.info(f"Current memory usage: {current / (1024*1024):.2f} MB, Peak: {peak / (1024*1024):.2f} MB")
     else:
-        # For stream processing, just check if the file exists and get its size
-        logger.info(f"Using streaming strategy for dataset {dataset_path}")
-        if not os.path.exists(dataset_path):
-            logger.error(f"Dataset file not found at {dataset_path}. Aborting.")
-            return False
-        
+        # Stream mode: Use memory-mapped dataset
+        memory_mapped_dataset = MemoryMappedDataset(dataset_path)
         dataset_size_bytes = os.path.getsize(dataset_path)
-        logger.info(f"Dataset file exists: {dataset_size_bytes / (1024*1024):.2f} MB")
-        plaintext_data = None  # Will be loaded in chunks during benchmarking
+        logger.info(f"Memory-mapped dataset initialized for stream processing: {dataset_size_bytes / (1024*1024):.2f} MB")
     
     # Get enabled encryption methods
     enabled_methods = []
@@ -328,118 +400,107 @@ def run_benchmarks(config, implementations):
                         logger.info(f"Using pre-generated RSA key from rotating key set")
                         key = rsa_rotating_keys.get_next_key()
                         # Add placeholder key generation time (we already measured it)
-                        metrics.keygen_wall_time_ms = key_gen_metrics.keygen_wall_time_ms / key_sets_count
-                        metrics.keygen_cpu_user_time_s = key_gen_metrics.keygen_cpu_user_time_s / key_sets_count
-                        metrics.keygen_cpu_system_time_s = key_gen_metrics.keygen_cpu_system_time_s / key_sets_count
-                        metrics.keygen_peak_rss_bytes = key_gen_metrics.keygen_peak_rss_bytes
+                        metrics.keygen_time_ns = int(key_gen_metrics.keygen_time_ns / key_sets_count)
+                        metrics.keygen_cpu_time_ns = int(key_gen_metrics.keygen_cpu_time_ns / key_sets_count)
+                        metrics.keygen_cpu_percent = key_gen_metrics.keygen_cpu_percent
+                        metrics.keygen_peak_memory_bytes = key_gen_metrics.keygen_peak_memory_bytes
+                        # Set algorithm metadata
+                        key_size_bytes = get_key_size_bytes(key, implementation)
+                        metrics.set_algorithm_metadata(implementation, key_size_bytes)
                     else:
                         # Generate a new key for each iteration
                         key = metrics.measure_keygen(implementation.generate_key)
+                        # Set algorithm metadata after key generation
+                        key_size_bytes = get_key_size_bytes(key, implementation)
+                        metrics.set_algorithm_metadata(implementation, key_size_bytes)
                     
-                    # Encryption
-                    if processing_strategy == "Memory":
-                        # Memory mode
-                        logger.info(f"Encrypting dataset (Memory mode)...")
+                    # Load or map dataset based on processing strategy
+                    if processing_strategy == "Stream":
+                        # Use memory-mapped dataset for streaming
+                        if memory_mapped_dataset is None:
+                            memory_mapped_dataset = MemoryMappedDataset(dataset_path)
+                            
+                        # Create chunks for stream processing
+                        chunk_size = 1024 * 1024  # 1MB chunks
+                        chunks = memory_mapped_dataset.create_chunks(chunk_size)
+                        
+                        logger.info(f"Processing {len(chunks)} chunks of {chunk_size} bytes each using stream mode")
+                        
+                        # Encryption with chunks
+                        encrypted_chunks = measure_chunked_encryption(
+                            metrics, 
+                            implementation.encrypt, 
+                            implementation, 
+                            chunks, 
+                            key, 
+                            chunk_size
+                        )
+                        
+                        # Decryption with chunks
+                        decrypted_chunks = measure_chunked_encryption(
+                            metrics, 
+                            implementation.decrypt, 
+                            implementation, 
+                            encrypted_chunks, 
+                            key, 
+                            chunk_size
+                        )
+                        
+                        # Verify correctness by comparing a sample of chunks
+                        correctness_checks = min(5, len(chunks))  # Check up to 5 chunks
+                        for check_idx in range(correctness_checks):
+                            if chunks[check_idx] != decrypted_chunks[check_idx]:
+                                logger.error(f"Correctness check failed for chunk {check_idx}")
+                                metrics.correctness_passed = False
+                                break
+                        else:
+                            metrics.correctness_passed = True
+                            
+                        # Clean up
+                        del chunks
+                        del encrypted_chunks
+                        del decrypted_chunks
+                        gc.collect()
+                        
+                    else:
+                        # Memory mode: Load entire dataset
+                        if cached_dataset is None:
+                            cached_dataset = load_dataset(dataset_path)
+                        
+                        # Perform encryption
                         ciphertext = measure_encryption_metrics(
                             metrics, 
                             implementation.encrypt, 
                             implementation, 
-                            plaintext_data, 
-                            key, 
-                            is_memory_mapped=isinstance(plaintext_data, MemoryMappedDataset)
+                            cached_dataset, 
+                            key
                         )
                         
-                        # Force GC before decryption
-                        gc.collect()
+                        # Perform decryption
+                        plaintext = measure_encryption_metrics(
+                            metrics, 
+                            implementation.decrypt, 
+                            implementation, 
+                            ciphertext, 
+                            key,
+                            cached_dataset  # Pass original plaintext for correctness checking
+                        )
                         
-                        # Decryption
-                        logger.info(f"Decrypting dataset (Memory mode)...")
-                        if isinstance(plaintext_data, MemoryMappedDataset):
-                            # For memory-mapped, we need to get original data for verification
-                            original_data = plaintext_data.read_all()
-                            decrypted_data = measure_encryption_metrics(
-                                metrics,
-                                implementation.decrypt,
-                                implementation,
-                                ciphertext,
-                                key,
-                                is_memory_mapped=False
-                            )
-                            del original_data
+                        # Verify correctness
+                        if cached_dataset == plaintext:
+                            metrics.correctness_passed = True
+                            logger.info(f"Correctness check passed for {impl_description}")
                         else:
-                            # Standard in-memory processing
-                            decrypted_data = measure_encryption_metrics(
-                                metrics,
-                                implementation.decrypt,
-                                implementation,
-                                ciphertext,
-                                key,
-                                is_memory_mapped=False
-                            )
+                            metrics.correctness_passed = False
+                            logger.error(f"Correctness check failed for {impl_description}")
                             
-                        # Clean up memory
+                        # Clean up
                         del ciphertext
-                        if 'decrypted_data' in locals():
-                            del decrypted_data
+                        del plaintext
                         gc.collect()
-                    else:
-                        # Stream mode processing
-                        logger.info(f"Processing dataset in Stream mode with chunk size {chunk_size_text}...")
-                        
-                        # Calculate number of chunks
-                        total_chunks = (dataset_size_bytes + chunk_size - 1) // chunk_size
-                        logger.info(f"Dataset will be processed in {total_chunks} chunks")
-                        
-                        # Process data in chunks
-                        with open(dataset_path, 'rb') as f:
-                            # Split the file into chunks for processing
-                            chunks = []
-                            chunk_number = 0
-                            
-                            while True:
-                                chunk_data = f.read(chunk_size)
-                                if not chunk_data:
-                                    break
-                                chunks.append(chunk_data)
-                                chunk_number += 1
-                                if chunk_number % 10 == 0:
-                                    logger.info(f"Loaded {chunk_number} chunks...")
-                            
-                            logger.info(f"Loaded {len(chunks)} chunks for processing")
-                            
-                            # Use the chunked encryption measurement
-                            logger.info(f"Encrypting chunks in Stream mode...")
-                            encrypted_chunks = measure_chunked_encryption(
-                                metrics,
-                                implementation.encrypt,
-                                implementation,
-                                chunks,
-                                key,
-                                chunk_size=chunk_size
-                            )
-                            
-                            # Force GC before decryption
-                            gc.collect()
-                            
-                            # Decrypt the chunks
-                            logger.info(f"Decrypting chunks in Stream mode...")
-                            decrypted_chunks = measure_chunked_encryption(
-                                metrics,
-                                implementation.decrypt,
-                                implementation,
-                                encrypted_chunks,
-                                key,
-                                chunk_size=chunk_size
-                            )
-                            
-                            # Clean up
-                            del chunks
-                            del encrypted_chunks
-                            del decrypted_chunks
-                            gc.collect()
                     
                     # Add results
-                    iteration_results.append(metrics.to_dict())
+                    iteration_results.append(metrics.to_dict(i + 1))  # Pass iteration number
                     logger.info(f"Iteration {i+1} completed successfully")
                     
                     # Memory usage logging
@@ -473,16 +534,18 @@ def run_benchmarks(config, implementations):
             logger.error(f"Error in benchmark for {impl_description}: {str(e)}")
             traceback.print_exc()
     
-    # Cleanup
+    # Clean up memory tracking if enabled
     if memory_tracking:
         tracemalloc.stop()
     
-    if processing_strategy == "Memory" and isinstance(plaintext_data, MemoryMappedDataset):
-        plaintext_data.close()
+    # Clean up memory-mapped dataset if used
+    if memory_mapped_dataset is not None:
+        memory_mapped_dataset.close()
         logger.info("Closed memory-mapped dataset")
     
     # Save results
-    success = save_results(results, session_dir)
+    session_id = os.path.basename(session_dir)  # Extract session name from path
+    success = save_results(results, session_dir, session_id)
     gc.collect()
     
     return success 

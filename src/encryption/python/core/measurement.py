@@ -12,7 +12,7 @@ import gc
 # Setup logging
 logger = logging.getLogger("PythonCore")
 
-def measure_encryption_metrics(metrics, process_func, implementation, data, key, is_memory_mapped=False, chunk_index=0):
+def measure_encryption_metrics(metrics, process_func, implementation, data, key, original_plaintext=None):
     """
     Universal method to measure encryption metrics regardless of implementation approach.
     Works for both regular memory processing and memory-mapped processing.
@@ -23,122 +23,23 @@ def measure_encryption_metrics(metrics, process_func, implementation, data, key,
         implementation: The encryption implementation
         data: Data to process (plaintext or ciphertext)
         key: Encryption key (can be a single key or a key pair tuple for RSA)
-        is_memory_mapped: Whether data is memory-mapped
-        chunk_index: For stream mode, the index of the current chunk
+        original_plaintext: For decryption, the original plaintext for correctness checking
         
     Returns:
         The processed data (ciphertext or plaintext)
     """
-    process = metrics.process
-    
-    # Get initial metrics
-    try:
-        initial_ctx = process.num_ctx_switches() if hasattr(metrics, "has_ctx_switches") and metrics.has_ctx_switches else None
-    except (psutil.AccessDenied, AttributeError, OSError):
-        initial_ctx = None
-    
-    try:
-        initial_cpu_times = process.cpu_times()
-    except (psutil.AccessDenied, AttributeError, OSError):
-        initial_cpu_times = None
-        logger.warning("CPU time metrics are not available - CPU metrics will not be collected")
-    
-    # Measure wall time
-    start_time = time.perf_counter()
-    
-    # Handle memory-mapped datasets by converting to bytes
-    if is_memory_mapped and hasattr(data, 'read_all'):
-        actual_data = data.read_all()
-    else:
-        actual_data = data
-    
-    # Process based on the type of function and data
-    try:
-        # Check if we're working with a rotating key set 
-        if hasattr(key, '__rotating_keys__'):
-            # Get the next key from the rotating key set
-            actual_key = key.get_next_key()
-            
-            # Special handling for RSA in stream mode
-            if hasattr(implementation, 'name') and 'rsa' in implementation.name.lower():
-                logger.debug(f"Using rotating key set for RSA {process_func.__name__} (chunk {chunk_index})")
-            
-            # Execute with the rotated key
-            result = process_func(actual_data, actual_key)
-        else:
-            # Regular key processing
-            result = process_func(actual_data, key)
-    except Exception as e:
-        logger.error(f"Error in {process_func.__name__}: {str(e)}")
-        result = b'' if process_func.__name__ == 'encrypt' else None
-    
-    end_time = time.perf_counter()
-    
-    # Calculate metrics
-    wall_time_ms = (end_time - start_time) * 1000  # Convert to ms
-    
-    # Get final metrics
-    try:
-        final_cpu_times = process.cpu_times() if initial_cpu_times is not None else None
-    except (psutil.AccessDenied, AttributeError, OSError):
-        final_cpu_times = None
-    
-    try:
-        final_ctx = process.num_ctx_switches() if initial_ctx is not None else None
-    except (psutil.AccessDenied, AttributeError, OSError):
-        final_ctx = None
-    
-    # Update the correct metrics based on function name
+    # For encryption, use the built-in metrics measurement
     if process_func.__name__ == 'encrypt':
-        metrics.encrypt_wall_time_ms = wall_time_ms
-        
-        # Update CPU time metrics if available
-        if initial_cpu_times is not None and final_cpu_times is not None:
-            metrics.encrypt_cpu_user_time_s = final_cpu_times.user - initial_cpu_times.user
-            metrics.encrypt_cpu_system_time_s = final_cpu_times.system - initial_cpu_times.system
-        
-        # Update context switch metrics if available
-        if initial_ctx is not None and final_ctx is not None:
-            metrics.encrypt_ctx_switches_voluntary = final_ctx.voluntary - initial_ctx.voluntary
-            metrics.encrypt_ctx_switches_involuntary = final_ctx.involuntary - initial_ctx.involuntary
-        
-        # Record peak memory usage
-        try:
-            metrics.encrypt_peak_rss_bytes = process.memory_info().rss
-        except (psutil.AccessDenied, AttributeError, OSError):
-            pass
-        
-        # Set ciphertext size safely
-        try:
-            metrics.ciphertext_total_bytes = len(result) if result and hasattr(result, '__len__') else 0
-        except (TypeError, AttributeError):
-            metrics.ciphertext_total_bytes = 0
-            logger.warning("Could not determine ciphertext size")
-    else:  # decrypt
-        metrics.decrypt_wall_time_ms = wall_time_ms
-        
-        # Update CPU time metrics if available
-        if initial_cpu_times is not None and final_cpu_times is not None:
-            metrics.decrypt_cpu_user_time_s = final_cpu_times.user - initial_cpu_times.user
-            metrics.decrypt_cpu_system_time_s = final_cpu_times.system - initial_cpu_times.system
-        
-        # Update context switch metrics if available
-        if initial_ctx is not None and final_ctx is not None:
-            metrics.decrypt_ctx_switches_voluntary = final_ctx.voluntary - initial_ctx.voluntary
-            metrics.decrypt_ctx_switches_involuntary = final_ctx.involuntary - initial_ctx.involuntary
-        
-        # Record peak memory usage
-        try:
-            metrics.decrypt_peak_rss_bytes = process.memory_info().rss
-        except (psutil.AccessDenied, AttributeError, OSError):
-            pass
+        return metrics.measure_encrypt(process_func, data, key)
     
-    # If using memory mapping, clean up temporary data to free memory
-    if is_memory_mapped and 'actual_data' in locals():
-        del actual_data
-        gc.collect()
-        
-    return result
+    # For decryption, use the built-in metrics measurement with correctness check
+    elif process_func.__name__ == 'decrypt':
+        return metrics.measure_decrypt(process_func, data, key, original_plaintext or data)
+    
+    # Fallback for other operations (shouldn't happen with current implementation)
+    else:
+        logger.warning(f"Unexpected function name: {process_func.__name__}")
+        return process_func(data, key)
 
 def measure_chunked_encryption(metrics, process_func, implementation, chunks, key, chunk_size=1024*1024):
     """
@@ -169,12 +70,17 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
         initial_cpu_times = None
         logger.warning("CPU time metrics are not available - CPU metrics will not be collected")
     
+    try:
+        initial_memory = process.memory_info()
+    except (psutil.AccessDenied, AttributeError, OSError):
+        initial_memory = None
+    
     # Process each chunk
     results = []
     total_bytes = 0
     
-    # Measure wall time
-    start_time = time.perf_counter()
+    # Measure wall time with nanosecond precision
+    start_time = time.perf_counter_ns()
     
     for i, chunk in enumerate(chunks):
         try:
@@ -209,10 +115,10 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
             logger.error(f"Error in {process_func.__name__} chunk {i}: {str(e)}")
             results.append(b'')
     
-    end_time = time.perf_counter()
+    end_time = time.perf_counter_ns()
     
     # Calculate metrics
-    wall_time_ms = (end_time - start_time) * 1000  # Convert to ms
+    operation_time_ns = end_time - start_time
     
     # Get final metrics
     try:
@@ -225,46 +131,69 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
     except (psutil.AccessDenied, AttributeError, OSError):
         final_ctx = None
     
+    try:
+        final_memory = process.memory_info()
+    except (psutil.AccessDenied, AttributeError, OSError):
+        final_memory = None
+    
     # Update the correct metrics based on function name
     if process_func.__name__ == 'encrypt':
-        metrics.encrypt_wall_time_ms = wall_time_ms
+        metrics.encrypt_time_ns = operation_time_ns
         
         # Update CPU time metrics if available
         if initial_cpu_times is not None and final_cpu_times is not None:
-            metrics.encrypt_cpu_user_time_s = final_cpu_times.user - initial_cpu_times.user
-            metrics.encrypt_cpu_system_time_s = final_cpu_times.system - initial_cpu_times.system
+            cpu_user_diff = final_cpu_times.user - initial_cpu_times.user
+            cpu_system_diff = final_cpu_times.system - initial_cpu_times.system
+            total_cpu_time = cpu_user_diff + cpu_system_diff
+            
+            # Convert to nanoseconds
+            metrics.encrypt_cpu_time_ns = int(total_cpu_time * 1_000_000_000)
+            
+            # Calculate CPU percentage
+            wall_time_s = operation_time_ns / 1_000_000_000
+            if wall_time_s > 0:
+                metrics.encrypt_cpu_percent = (total_cpu_time / wall_time_s) * 100
         
         # Update context switch metrics if available
         if initial_ctx is not None and final_ctx is not None:
-            metrics.encrypt_ctx_switches_voluntary = final_ctx.voluntary - initial_ctx.voluntary
-            metrics.encrypt_ctx_switches_involuntary = final_ctx.involuntary - initial_ctx.involuntary
+            metrics.encrypt_ctx_switches_voluntary = max(0, final_ctx.voluntary - initial_ctx.voluntary)
+            metrics.encrypt_ctx_switches_involuntary = max(0, final_ctx.involuntary - initial_ctx.involuntary)
         
         # Record peak memory usage
-        try:
-            metrics.encrypt_peak_rss_bytes = process.memory_info().rss
-        except (psutil.AccessDenied, AttributeError, OSError):
-            pass
+        if final_memory is not None:
+            metrics.encrypt_peak_memory_bytes = final_memory.rss
+            if initial_memory is not None:
+                metrics.encrypt_allocated_memory_bytes = max(0, final_memory.rss - initial_memory.rss)
         
         # Set ciphertext size
-        metrics.ciphertext_total_bytes = total_bytes
+        metrics.ciphertext_size_bytes = total_bytes
     else:  # decrypt
-        metrics.decrypt_wall_time_ms = wall_time_ms
+        metrics.decrypt_time_ns = operation_time_ns
         
         # Update CPU time metrics if available
         if initial_cpu_times is not None and final_cpu_times is not None:
-            metrics.decrypt_cpu_user_time_s = final_cpu_times.user - initial_cpu_times.user
-            metrics.decrypt_cpu_system_time_s = final_cpu_times.system - initial_cpu_times.system
+            cpu_user_diff = final_cpu_times.user - initial_cpu_times.user
+            cpu_system_diff = final_cpu_times.system - initial_cpu_times.system
+            total_cpu_time = cpu_user_diff + cpu_system_diff
+            
+            # Convert to nanoseconds
+            metrics.decrypt_cpu_time_ns = int(total_cpu_time * 1_000_000_000)
+            
+            # Calculate CPU percentage
+            wall_time_s = operation_time_ns / 1_000_000_000
+            if wall_time_s > 0:
+                metrics.decrypt_cpu_percent = (total_cpu_time / wall_time_s) * 100
         
         # Update context switch metrics if available
         if initial_ctx is not None and final_ctx is not None:
-            metrics.decrypt_ctx_switches_voluntary = final_ctx.voluntary - initial_ctx.voluntary
-            metrics.decrypt_ctx_switches_involuntary = final_ctx.involuntary - initial_ctx.involuntary
+            metrics.decrypt_ctx_switches_voluntary = max(0, final_ctx.voluntary - initial_ctx.voluntary)
+            metrics.decrypt_ctx_switches_involuntary = max(0, final_ctx.involuntary - initial_ctx.involuntary)
         
         # Record peak memory usage
-        try:
-            metrics.decrypt_peak_rss_bytes = process.memory_info().rss
-        except (psutil.AccessDenied, AttributeError, OSError):
-            pass
+        if final_memory is not None:
+            metrics.decrypt_peak_memory_bytes = final_memory.rss
+            if initial_memory is not None:
+                metrics.decrypt_allocated_memory_bytes = max(0, final_memory.rss - initial_memory.rss)
     
     return results
 
