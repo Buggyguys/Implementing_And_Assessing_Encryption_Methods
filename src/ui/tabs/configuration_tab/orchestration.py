@@ -24,8 +24,9 @@ class OrchestrationThread(QThread):
         self.running = False
         self.success = False
         self.error_message = ""
-        # Set this as a daemon thread (will be killed when main thread exits)
-        self.setTerminationEnabled(True)
+        self.custom_handler = None
+        # Ensure proper cleanup
+        self.finished.connect(self._cleanup)
     
     def run(self):
         """Execute the orchestrator."""
@@ -57,6 +58,8 @@ class OrchestrationThread(QThread):
         finally:
             # Always make sure to reset running flag
             self.running = False
+            # Clean up logging
+            self._cleanup_logging()
     
     def _setup_logging(self):
         """Redirect logging to emit progress updates."""
@@ -66,16 +69,43 @@ class OrchestrationThread(QThread):
                 self.signal = signal
             
             def emit(self, record):
-                msg = self.format(record)
-                self.signal.emit(msg)
+                try:
+                    msg = self.format(record)
+                    self.signal.emit(msg)
+                except:
+                    # Ignore errors in logging to prevent crashes
+                    pass
         
         # Get the orchestrator logger
         logger = logging.getLogger("Orchestrator")
         
         # Add our custom handler
-        handler = SignalHandler(self.progress_update)
-        handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-        logger.addHandler(handler)
+        self.custom_handler = SignalHandler(self.progress_update)
+        self.custom_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+        logger.addHandler(self.custom_handler)
+    
+    def _cleanup_logging(self):
+        """Clean up logging handlers."""
+        try:
+            if self.custom_handler:
+                logger = logging.getLogger("Orchestrator")
+                logger.removeHandler(self.custom_handler)
+                self.custom_handler = None
+        except:
+            # Ignore cleanup errors
+            pass
+    
+    def _cleanup(self):
+        """Clean up resources when thread finishes."""
+        try:
+            self._cleanup_logging()
+            self.running = False
+            # Force garbage collection to clean up any remaining objects
+            import gc
+            gc.collect()
+        except:
+            # Ignore cleanup errors to prevent crashes
+            pass
 
 
 class TestExecutor:

@@ -86,17 +86,13 @@ class MainWindow(QMainWindow):
         
     def closeEvent(self, event):
         """Handle application close event."""
-        # Check if any orchestration threads are running
-        if hasattr(self.configuration_tab, 'orchestrator_thread') and self.configuration_tab.orchestrator_thread and self.configuration_tab.orchestrator_thread.isRunning():
-            # Wait for thread to finish with a timeout
-            self.status_message.setText("Waiting for orchestration to complete...")
-            self.configuration_tab.orchestrator_thread.quit()
-            finished = self.configuration_tab.orchestrator_thread.wait(3000)  # 3 second timeout
-            
-            if not finished:
-                # If not finished, force termination
-                self.configuration_tab.orchestrator_thread.terminate()
-                self.configuration_tab.orchestrator_thread.wait()
+        try:
+            # Check if any orchestration threads are running and clean them up
+            if hasattr(self.configuration_tab, 'orchestrator_thread') and self.configuration_tab.orchestrator_thread:
+                self.status_message.setText("Cleaning up orchestration...")
+                self.configuration_tab._cleanup_orchestrator_thread()
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
         
         # Accept the close event
         event.accept() 

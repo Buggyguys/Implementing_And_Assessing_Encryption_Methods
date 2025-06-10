@@ -154,18 +154,49 @@ def run_language_benchmark(language, config):
                     logger.error(f"{language} core executable not found at {executable_path}")
                     return False
             else:
-                # It's a script - determine interpreter
-                interpreter = "python3"  # Default for Python scripts
-                
-                if language == "go":
-                    interpreter = "go run"
-                
-                # Make the script executable
-                os.chmod(lang_script_path, 0o755)
-                
-                # Pass JSON config path to the script
+                # It's a script - handle each language appropriately
                 session_json_path = os.path.join(session_dir, "test_config.json")
-                subprocess.run(f"{interpreter} {lang_script_path} {session_json_path}", shell=True, check=True)
+                
+                if language == "python":
+                    # For Python, use better process isolation to prevent segfaults
+                    os.chmod(lang_script_path, 0o755)
+                    
+                    # Use Popen for better process control and isolation
+                    env = os.environ.copy()
+                    # Ensure clean Python environment
+                    env['PYTHONDONTWRITEBYTECODE'] = '1'  # Don't create .pyc files
+                    env['PYTHONUNBUFFERED'] = '1'  # Unbuffered output
+                    
+                    process = subprocess.Popen(
+                        ["python3", lang_script_path, session_json_path],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        env=env,
+                        # Add process isolation
+                        preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+                    )
+                    stdout, stderr = process.communicate()
+                    
+                    if process.returncode != 0:
+                        logger.error(f"Python process failed with return code {process.returncode}")
+                        if stderr:
+                            logger.error(f"Python stderr: {stderr}")
+                        return False
+                    
+                    # Log output if needed
+                    if stdout:
+                        logger.info(f"Python stdout: {stdout}")
+                        
+                elif language == "go":
+                    # For Go, use go run
+                    os.chmod(lang_script_path, 0o755)
+                    subprocess.run(f"go run {lang_script_path} {session_json_path}", shell=True, check=True)
+                else:
+                    # For other interpreted languages
+                    interpreter = "python3"  # Default fallback
+                    os.chmod(lang_script_path, 0o755)
+                    subprocess.run(f"{interpreter} {lang_script_path} {session_json_path}", shell=True, check=True)
         
         # For C and Zig languages, clean up placeholder implementations
         if language in ["c", "zig"]:
@@ -173,6 +204,33 @@ def run_language_benchmark(language, config):
             if os.path.exists(clean_script_path):
                 os.chmod(clean_script_path, 0o755)  # Make executable
                 subprocess.run([clean_script_path], check=True)
+        
+        # For Python language, clean up any residual files to prevent segmentation faults
+        if language == "python":
+            logger.info(f"Cleaning up {language} artifacts...")
+            python_dir = os.path.join(script_dir, "encryption", language)
+            try:
+                # Remove Python cache directories
+                import shutil
+                for root, dirs, files in os.walk(python_dir):
+                    for dir_name in dirs:
+                        if dir_name == "__pycache__":
+                            cache_dir = os.path.join(root, dir_name)
+                            shutil.rmtree(cache_dir, ignore_errors=True)
+                
+                # Remove .pyc files
+                for root, dirs, files in os.walk(python_dir):
+                    for file in files:
+                        if file.endswith('.pyc'):
+                            pyc_file = os.path.join(root, file)
+                            try:
+                                os.remove(pyc_file)
+                            except:
+                                pass
+                                
+                logger.info(f"{language} cleanup completed")
+            except Exception as e:
+                logger.warning(f"Error during {language} cleanup: {e}")
         
         # For Go language, clean up build artifacts to prevent segmentation faults
         if language == "go":

@@ -51,6 +51,7 @@ class ConfigurationTab(QWidget):
         languages_layout = QGridLayout()
         
         # Language checkboxes
+        self.lang_python_check = QCheckBox("Python")
         self.lang_zig_check = QCheckBox("Zig")
         self.lang_c_check = QCheckBox("C")
         self.lang_rust_check = QCheckBox("Rust")
@@ -58,11 +59,12 @@ class ConfigurationTab(QWidget):
         self.lang_java_check = QCheckBox("Java")
         
         # Add checkboxes to grid
-        languages_layout.addWidget(self.lang_zig_check, 0, 0)
-        languages_layout.addWidget(self.lang_c_check, 0, 1)
-        languages_layout.addWidget(self.lang_rust_check, 0, 2)
-        languages_layout.addWidget(self.lang_go_check, 1, 0)
-        languages_layout.addWidget(self.lang_java_check, 1, 1)
+        languages_layout.addWidget(self.lang_python_check, 0, 0)
+        languages_layout.addWidget(self.lang_zig_check, 0, 1)
+        languages_layout.addWidget(self.lang_c_check, 0, 2)
+        languages_layout.addWidget(self.lang_rust_check, 1, 0)
+        languages_layout.addWidget(self.lang_go_check, 1, 1)
+        languages_layout.addWidget(self.lang_java_check, 1, 2)
         
         # Set layout for languages group
         languages_group.setLayout(languages_layout)
@@ -231,7 +233,7 @@ class ConfigurationTab(QWidget):
         main_layout.addWidget(scroll_area)
         
         # Default selections
-        self.lang_zig_check.setChecked(True)
+        self.lang_python_check.setChecked(True)
         self.aes_check.setChecked(True)
         
         # Connect signals
@@ -366,6 +368,7 @@ class ConfigurationTab(QWidget):
                 
                 # Update UI with loaded config
                 # Languages
+                self.lang_python_check.setChecked(config["languages"].get("python", False))
                 self.lang_zig_check.setChecked(config["languages"]["zig"])
                 self.lang_c_check.setChecked(config["languages"]["c"])
                 self.lang_rust_check.setChecked(config["languages"]["rust"])
@@ -437,17 +440,8 @@ class ConfigurationTab(QWidget):
             )
             
             if reply == QMessageBox.StandardButton.Yes:
-                # Properly terminate the thread
-                self.orchestrator_thread.terminate()
-                self.orchestrator_thread.wait(3000)  # Wait up to 3 seconds for clean termination
-                
-                # Clean up any temporary files
-                for file in os.listdir(os.getcwd()):
-                    if file.startswith("session-") and file.endswith(".json"):
-                        try:
-                            os.remove(os.path.join(os.getcwd(), file))
-                        except:
-                            pass
+                # Properly stop and clean up the thread
+                self._cleanup_orchestrator_thread()
             else:
                 return
         
@@ -470,6 +464,7 @@ class ConfigurationTab(QWidget):
         """Validate user selections."""
         # Check if at least one language is selected
         if not any([
+            self.lang_python_check.isChecked(),
             self.lang_zig_check.isChecked(),
             self.lang_c_check.isChecked(),
             self.lang_rust_check.isChecked(),
@@ -575,6 +570,7 @@ class ConfigurationTab(QWidget):
         # Create config dictionary (enhanced with new fields)
         config = {
             "languages": {
+                "python": self.lang_python_check.isChecked(),
                 "zig": self.lang_zig_check.isChecked(),
                 "c": self.lang_c_check.isChecked(),
                 "rust": self.lang_rust_check.isChecked(),
@@ -651,6 +647,7 @@ class ConfigurationTab(QWidget):
         
         # For other languages, run the orchestrator
         if any([
+            self.lang_python_check.isChecked(),
             self.lang_rust_check.isChecked(),
             self.lang_go_check.isChecked(),
             self.lang_java_check.isChecked()
@@ -716,6 +713,43 @@ class ConfigurationTab(QWidget):
             print(error_message)
             QMessageBox.warning(self, "Orchestration Error", 
                                f"Benchmarking encountered an error:\n\n{message}")
+    
+    def _cleanup_orchestrator_thread(self):
+        """Safely clean up the orchestrator thread."""
+        if self.orchestrator_thread:
+            try:
+                # First try to quit gracefully
+                self.orchestrator_thread.quit()
+                if not self.orchestrator_thread.wait(2000):  # Wait 2 seconds
+                    # If it doesn't quit gracefully, terminate it
+                    self.orchestrator_thread.terminate()
+                    self.orchestrator_thread.wait(3000)  # Wait up to 3 seconds for termination
+                
+                # Disconnect all signals to prevent issues
+                try:
+                    self.orchestrator_thread.finished.disconnect()
+                    self.orchestrator_thread.orchestration_complete.disconnect()
+                    self.orchestrator_thread.progress_update.disconnect()
+                except:
+                    pass
+                
+                # Clean up the thread reference
+                self.orchestrator_thread = None
+                
+                # Clean up any temporary files
+                for file in os.listdir(os.getcwd()):
+                    if file.startswith("session-") and file.endswith(".json"):
+                        try:
+                            os.remove(os.path.join(os.getcwd(), file))
+                        except:
+                            pass
+                
+                # Force garbage collection
+                import gc
+                gc.collect()
+                
+            except Exception as e:
+                print(f"Error during thread cleanup: {e}")
 
 
 # Export the main class
