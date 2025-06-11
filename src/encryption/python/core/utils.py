@@ -90,6 +90,50 @@ class MemoryMappedDataset:
             # Suppress all exceptions during garbage collection
             pass
 
+    def create_chunks(self, chunk_size):
+        """
+        Create a generator that yields data chunks for streaming processing.
+        This is memory-efficient as it only keeps one chunk in memory at a time.
+        
+        Args:
+            chunk_size: Size of each chunk in bytes
+            
+        Yields:
+            Byte chunks from the dataset
+        """
+        if self._closed:
+            raise ValueError("Cannot create chunks from closed memory-mapped dataset")
+        
+        offset = 0
+        chunk_count = 0
+        
+        while offset < self.file_size:
+            # Calculate remaining bytes
+            remaining = self.file_size - offset
+            current_chunk_size = min(chunk_size, remaining)
+            
+            # Read chunk from memory-mapped file
+            chunk_data = self.read(offset, current_chunk_size)
+            yield chunk_data
+            
+            offset += current_chunk_size
+            chunk_count += 1
+            
+        logger.info(f"Generated {chunk_count} chunks from dataset (chunk size: {chunk_size} bytes)")
+
+    def get_chunks_list(self, chunk_size):
+        """
+        Create a list of data chunks (for compatibility with current code).
+        Note: This loads all chunks into memory, which reduces the memory benefits of streaming.
+        
+        Args:
+            chunk_size: Size of each chunk in bytes
+            
+        Returns:
+            List of byte chunks
+        """
+        return list(self.create_chunks(chunk_size))
+
 class RotatingKeySet:
     """Class to manage a set of keys that rotate for each chunk of data."""
     

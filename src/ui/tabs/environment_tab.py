@@ -33,11 +33,23 @@ class EnvironmentCheckWorker(QThread):
         """Run the environment checks."""
         try:
             # Set up environment checks (total number of checks)
-            total_checks = 7  # Update when adding/removing checks
+            total_checks = 9  # Updated to include PyPy and Python packages checks
             current_check = 1
             
             # Check Python
             self._check_python(current_check, total_checks)
+            if self.is_canceled:
+                return
+            current_check += 1
+            
+            # Check PyPy
+            self._check_pypy(current_check, total_checks)
+            if self.is_canceled:
+                return
+            current_check += 1
+            
+            # Check Python packages
+            self._check_python_packages(current_check, total_checks)
             if self.is_canceled:
                 return
             current_check += 1
@@ -90,29 +102,119 @@ class EnvironmentCheckWorker(QThread):
         self.is_canceled = True
     
     def _check_python(self, current_check, total_checks):
-        """Check Python version."""
+        """Check Python version and details."""
         item_name = "Python Version"
         self.progress_updated.emit(
             int((current_check / total_checks) * 100),
             f"Checking {item_name}..."
         )
         
-        # Get Python version
+        # Get Python version and implementation
         version = sys.version.split()[0]
+        implementation = platform.python_implementation()
         major, minor, _ = version.split(".")
+        
+        # Get Python executable path
+        python_path = sys.executable
         
         # Check if version is at least 3.9
         if int(major) >= 3 and int(minor) >= 9:
             self.item_result.emit(
                 item_name,
                 True,
-                f"Python {version} is installed (recommended: 3.9+)"
+                f"{implementation} {version} at {python_path} (recommended: 3.9+)"
             )
         else:
             self.item_result.emit(
                 item_name,
                 False,
-                f"Python {version} is installed, but 3.9+ is recommended"
+                f"{implementation} {version} at {python_path} - Version 3.9+ is recommended for optimal performance"
+            )
+    
+    def _check_pypy(self, current_check, total_checks):
+        """Check PyPy version."""
+        item_name = "PyPy Version"
+        self.progress_updated.emit(
+            int((current_check / total_checks) * 100),
+            f"Checking {item_name}..."
+        )
+        
+        # Check if pypy is available
+        pypy_path = shutil.which("pypy")
+        pypy3_path = shutil.which("pypy3")
+        
+        if pypy_path or pypy3_path:
+            try:
+                # Try pypy3 first, then pypy
+                cmd = "pypy3" if pypy3_path else "pypy"
+                result = subprocess.run(
+                    [cmd, "--version"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                version_info = result.stderr.strip() if result.stderr else result.stdout.strip()
+                self.item_result.emit(
+                    item_name,
+                    True,
+                    f"PyPy is installed: {version_info} (recommended for Python encryption performance)"
+                )
+            except subprocess.SubprocessError:
+                self.item_result.emit(
+                    item_name,
+                    False,
+                    "PyPy is installed but failed to get version"
+                )
+        else:
+            self.item_result.emit(
+                item_name,
+                False,
+                "PyPy not found (optional, recommended for faster Python encryption implementations)"
+            )
+    
+    def _check_python_packages(self, current_check, total_checks):
+        """Check Python encryption packages."""
+        item_name = "Python Crypto Packages"
+        self.progress_updated.emit(
+            int((current_check / total_checks) * 100),
+            f"Checking {item_name}..."
+        )
+        
+        # Check for encryption-related packages
+        crypto_packages = {
+            "cryptography": "Modern cryptographic library",
+            "pycryptodome": "Cryptographic library (alternative to PyCrypto)",
+            "pynacl": "Python binding to NaCl library",
+            "pyopenssl": "Python wrapper for OpenSSL"
+        }
+        
+        installed_packages = []
+        missing_packages = []
+        
+        for package, description in crypto_packages.items():
+            try:
+                __import__(package)
+                installed_packages.append(f"{package} ({description})")
+            except ImportError:
+                missing_packages.append(package)
+        
+        if installed_packages:
+            status_msg = f"Installed: {'; '.join(installed_packages)}"
+            if missing_packages:
+                status_msg += f" | Missing: {', '.join(missing_packages)}"
+            
+            # Consider it successful if at least cryptography is installed
+            has_cryptography = any("cryptography" in pkg for pkg in installed_packages)
+            self.item_result.emit(
+                item_name,
+                has_cryptography,
+                status_msg
+            )
+        else:
+            self.item_result.emit(
+                item_name,
+                False,
+                f"No crypto packages found. Install: {', '.join(crypto_packages.keys())}"
             )
     
     def _check_c_compiler(self, current_check, total_checks):

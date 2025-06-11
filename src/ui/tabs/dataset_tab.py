@@ -20,7 +20,8 @@ from PyQt6.QtWidgets import (
     QRadioButton, QPushButton, QFileDialog, QLabel,
     QComboBox, QSpinBox, QLineEdit, QProgressBar,
     QFormLayout, QSizePolicy, QScrollArea, QCheckBox,
-    QSlider, QDoubleSpinBox, QButtonGroup
+    QSlider, QDoubleSpinBox, QButtonGroup, QTableWidget,
+    QTableWidgetItem, QHeaderView, QMessageBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QSize
 
@@ -771,22 +772,41 @@ class DatasetTab(QWidget):
         scroll_layout = QVBoxLayout(scroll_content)
         
         # Dataset selection group
-        selection_group = QGroupBox("Select Existing Dataset")
+        selection_group = QGroupBox("Existing Datasets")
         selection_layout = QVBoxLayout()
         
-        # Dataset selection - use a list widget instead of file dialog
-        self.datasets_list = QComboBox()
-        self.datasets_list.setMinimumWidth(400)
-        selection_layout.addWidget(self.datasets_list)
+        # Create table for datasets
+        self.datasets_table = QTableWidget()
+        self.datasets_table.setColumnCount(4)
+        self.datasets_table.setHorizontalHeaderLabels(["Name", "Type", "Size", "File Size"])
         
-        # Refresh datasets button
-        refresh_layout = QHBoxLayout()
-        self.refresh_button = QPushButton("Refresh Datasets")
-        self.dataset_info_label = QLabel("No dataset selected")
-        refresh_layout.addWidget(self.refresh_button)
-        refresh_layout.addWidget(self.dataset_info_label)
-        refresh_layout.addStretch()
-        selection_layout.addLayout(refresh_layout)
+        # Configure table
+        self.datasets_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.datasets_table.setAlternatingRowColors(True)
+        self.datasets_table.horizontalHeader().setStretchLastSection(True)
+        self.datasets_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.datasets_table.setMinimumHeight(200)
+        
+        selection_layout.addWidget(self.datasets_table)
+        
+        # Action buttons for dataset management
+        buttons_layout = QHBoxLayout()
+        
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setMaximumWidth(100)
+        buttons_layout.addWidget(self.refresh_button)
+        
+        self.remove_button = QPushButton("Remove Selected")
+        self.remove_button.setMaximumWidth(150)
+        self.remove_button.setEnabled(False)  # Disabled by default
+        buttons_layout.addWidget(self.remove_button)
+        
+        buttons_layout.addStretch()
+        
+        self.dataset_info_label = QLabel("Select a dataset from the table above")
+        buttons_layout.addWidget(self.dataset_info_label)
+        
+        selection_layout.addLayout(buttons_layout)
         
         # Set layout for selection group
         selection_group.setLayout(selection_layout)
@@ -816,8 +836,8 @@ class DatasetTab(QWidget):
         
         # Total size value
         self.total_size_spin = QSpinBox()
-        self.total_size_spin.setRange(1, 50000)  
-        self.total_size_spin.setValue(1024)  # Default to 1MB
+        self.total_size_spin.setRange(1, 50000)  # Allow down to 1KB  
+        self.total_size_spin.setValue(100)  # Default to 100KB (more reasonable than 1MB)
         size_layout.addWidget(self.total_size_spin)
         
         # Size unit selection
@@ -827,7 +847,7 @@ class DatasetTab(QWidget):
         size_layout.addWidget(self.size_unit_combo)
         
         # Add a label to show the size in bytes for reference
-        self.size_tooltip_label = QLabel("(Range: 500KB - 50GB)")
+        self.size_tooltip_label = QLabel("(Range: 1KB - 50GB)")
         size_layout.addWidget(self.size_tooltip_label)
         
         creation_layout.addRow("Total Size:", size_layout)
@@ -878,7 +898,10 @@ class DatasetTab(QWidget):
         self.dataset_type_combo.currentIndexChanged.connect(self._update_custom_params)
         
         # Connect dataset list to selection handler
-        self.datasets_list.currentIndexChanged.connect(self._dataset_selected)
+        self.datasets_table.cellClicked.connect(self._dataset_selected)
+        
+        # Connect remove button
+        self.remove_button.clicked.connect(self._remove_selected_dataset)
         
         # Connect generate button
         self.generate_button.clicked.connect(self._generate_dataset)
@@ -1182,9 +1205,8 @@ class DatasetTab(QWidget):
             self.custom_params_layout.addRow("Presets:", preset_layout)
         
     def _refresh_datasets_list(self):
-        """Refresh the list of available datasets."""
-        self.datasets_list.clear()
-        self.datasets_list.addItem("-- Select a dataset --")
+        """Refresh the table of available datasets."""
+        self.datasets_table.setRowCount(0)
         
         # Use the absolute path to the datasets directory
         project_root = os.getcwd()
@@ -1204,7 +1226,8 @@ class DatasetTab(QWidget):
         for file in os.listdir(dataset_dir):
             if file.startswith("dataset_") and os.path.isfile(os.path.join(dataset_dir, file)):
                 # Get file size
-                file_size = os.path.getsize(os.path.join(dataset_dir, file))
+                file_path = os.path.join(dataset_dir, file)
+                file_size = os.path.getsize(file_path)
                 file_size_str = self._format_size(file_size)
                 
                 # Parse dataset type and size from filename
@@ -1213,43 +1236,106 @@ class DatasetTab(QWidget):
                     if file.count('_') == 2:
                         _, data_type, size_part = file.split('_', 2)
                         size_part = size_part.replace('.dat', '')
-                        display_name = f"{data_type} ({size_part}) - {file_size_str}"
+                        name = data_type
                     else:
                         parts = file.split('_')
-                        custom_name = '_'.join(parts[1:-2])
+                        name = '_'.join(parts[1:-2])
                         data_type = parts[-2]
                         size_part = parts[-1].replace('.dat', '')
-                        display_name = f"{custom_name} - {data_type} ({size_part}) - {file_size_str}"
                 except:
-                    # If parsing fails, just use the filename
-                    display_name = f"{file} - {file_size_str}"
+                    # If parsing fails, use defaults
+                    name = file.replace('.dat', '')
+                    data_type = "Unknown"
+                    size_part = "Unknown"
                 
-                # Add to list with full path as data
-                dataset_files.append((display_name, os.path.join(dataset_dir, file)))
+                dataset_files.append((name, data_type, size_part, file_size_str, file_path))
         
         # Sort by name
         dataset_files.sort()
         
-        # Add to combobox
-        for display_name, file_path in dataset_files:
-            self.datasets_list.addItem(display_name, file_path)
+        # Populate table
+        for i, (name, data_type, size_part, file_size_str, file_path) in enumerate(dataset_files):
+            self.datasets_table.insertRow(i)
+            
+            # Create table items
+            name_item = QTableWidgetItem(name)
+            name_item.setData(Qt.ItemDataRole.UserRole, file_path)  # Store file path in name item
+            type_item = QTableWidgetItem(data_type)
+            size_item = QTableWidgetItem(size_part)
+            file_size_item = QTableWidgetItem(file_size_str)
+            
+            self.datasets_table.setItem(i, 0, name_item)
+            self.datasets_table.setItem(i, 1, type_item)
+            self.datasets_table.setItem(i, 2, size_item)
+            self.datasets_table.setItem(i, 3, file_size_item)
+        
+        # Update remove button state
+        self.remove_button.setEnabled(self.datasets_table.rowCount() > 0)
     
-    def _dataset_selected(self, index):
-        """Handle dataset selection from the dropdown."""
-        if index <= 0:
+    def _dataset_selected(self, row, column):
+        """Handle dataset selection from the table."""
+        if row < 0:
             self.selected_dataset_path = None
             self.dataset_info_label.setText("No dataset selected")
             return
         
-        # Get selected dataset path
-        self.selected_dataset_path = self.datasets_list.itemData(index)
+        # Get selected dataset path from the name item's user data
+        name_item = self.datasets_table.item(row, 0)
+        if name_item:
+            self.selected_dataset_path = name_item.data(Qt.ItemDataRole.UserRole)
+            
+            # Update info label
+            filename = os.path.basename(self.selected_dataset_path)
+            file_size = os.path.getsize(self.selected_dataset_path)
+            self.dataset_info_label.setText(f"Selected: {filename} ({self._format_size(file_size)})")
+            
+            self.status_message.emit(f"Selected dataset: {filename}")
+        else:
+            self.selected_dataset_path = None
+            self.dataset_info_label.setText("No dataset selected")
+    
+    def _remove_selected_dataset(self):
+        """Remove the selected dataset from the file system."""
+        current_row = self.datasets_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "No Selection", "Please select a dataset to remove.")
+            return
         
-        # Update info label
-        filename = os.path.basename(self.selected_dataset_path)
-        file_size = os.path.getsize(self.selected_dataset_path)
-        self.dataset_info_label.setText(f"Selected: {filename} ({self._format_size(file_size)})")
+        # Get dataset info
+        name_item = self.datasets_table.item(current_row, 0)
+        if not name_item:
+            return
+            
+        file_path = name_item.data(Qt.ItemDataRole.UserRole)
+        filename = os.path.basename(file_path)
         
-        self.status_message.emit(f"Selected dataset: {filename}")
+        # Confirm deletion
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to delete the dataset '{filename}'?\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Remove the file
+                os.remove(file_path)
+                
+                # Clear selection if this was the selected dataset
+                if self.selected_dataset_path == file_path:
+                    self.selected_dataset_path = None
+                    self.dataset_info_label.setText("No dataset selected")
+                
+                # Refresh the table
+                self._refresh_datasets_list()
+                
+                self.status_message.emit(f"Dataset removed: {filename}")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to remove dataset: {str(e)}")
+                self.status_message.emit(f"Error removing dataset: {str(e)}")
     
     def _generate_dataset(self):
         """Generate a new dataset based on the specified parameters."""
@@ -1367,10 +1453,12 @@ class DatasetTab(QWidget):
         # Refresh the list to include the new dataset
         self._refresh_datasets_list()
         
-        # Select the newly created dataset
-        for i in range(self.datasets_list.count()):
-            if self.datasets_list.itemData(i) == file_path:
-                self.datasets_list.setCurrentIndex(i)
+        # Select the newly created dataset in the table
+        for i in range(self.datasets_table.rowCount()):
+            name_item = self.datasets_table.item(i, 0)
+            if name_item and name_item.data(Qt.ItemDataRole.UserRole) == file_path:
+                self.datasets_table.selectRow(i)
+                self._dataset_selected(i, 0)  # Trigger selection
                 break
     
     @pyqtSlot(str)
@@ -1422,23 +1510,19 @@ class DatasetTab(QWidget):
         unit = self.size_unit_combo.currentText()
         
         if unit == "KB":
-            self.total_size_spin.setMinimum(500)  # Min 500 KB
+            self.total_size_spin.setMinimum(1)  # Min 1 KB (reduced from 500)
             self.total_size_spin.setMaximum(50000)  # Max 50,000 KB
-            if self.total_size_spin.value() < 500:
-                self.total_size_spin.setValue(500)
         elif unit == "MB":
             self.total_size_spin.setMinimum(1)  # Min 1 MB
             self.total_size_spin.setMaximum(50000)  # Max 50,000 MB
-            if self.total_size_spin.value() < 1:
-                self.total_size_spin.setValue(1)
         elif unit == "GB":
             self.total_size_spin.setMinimum(1)  # Min 1 GB
             self.total_size_spin.setMaximum(50)  # Max 50 GB
             if self.total_size_spin.value() > 50:
                 self.total_size_spin.setValue(50)
                 
-        # Show the valid range instead of bytes size
-        self.size_tooltip_label.setText("(Range: 500KB - 50GB)")
+        # Show the valid range 
+        self.size_tooltip_label.setText("(Range: 1KB - 50GB)")
 
     def _clear_layout(self, layout):
         """Clear all widgets and nested layouts from a layout."""

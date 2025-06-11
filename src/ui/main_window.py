@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
         
         # Set window properties
         self.setWindowTitle("CryptoBench Pro")
-        self.setMinimumSize(1024, 768)
+        self.setMinimumSize(1200, 900)
         
         # Create central widget and layout
         self.central_widget = QWidget()
@@ -39,15 +39,15 @@ class MainWindow(QMainWindow):
         self.tab_widget.setMovable(False)
         
         # Create tabs
+        self.environment_tab = EnvironmentTab()
         self.dataset_tab = DatasetTab()
         self.configuration_tab = ConfigurationTab()
-        self.environment_tab = EnvironmentTab()
         self.results_tab = ResultsTab()
         
-        # Add tabs to tab widget
+        # Add tabs to tab widget in the new order
+        self.tab_widget.addTab(self.environment_tab, "Environment Check")
         self.tab_widget.addTab(self.dataset_tab, "Dataset Management")
         self.tab_widget.addTab(self.configuration_tab, "Test Configuration")
-        self.tab_widget.addTab(self.environment_tab, "Environment Check")
         self.tab_widget.addTab(self.results_tab, "Results Viewer")
         
         # Add tab widget to main layout
@@ -70,9 +70,9 @@ class MainWindow(QMainWindow):
         self.tab_widget.currentChanged.connect(self._handle_tab_changed)
         
         # Connect signals from tabs
+        self.environment_tab.status_message.connect(self._update_status)
         self.dataset_tab.status_message.connect(self._update_status)
         self.configuration_tab.status_message.connect(self._update_status)
-        self.environment_tab.status_message.connect(self._update_status)
         self.results_tab.status_message.connect(self._update_status)
     
     def _handle_tab_changed(self, index):

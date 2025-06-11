@@ -415,55 +415,66 @@ def run_benchmarks(config, implementations):
                         metrics.set_algorithm_metadata(implementation, key_size_bytes)
                     
                     # Load or map dataset based on processing strategy
-                    if processing_strategy == "Stream":
-                        # Use memory-mapped dataset for streaming
+                    if processing_strategy == "Stream" and not ('rsa' in method_name.lower()):
+                        # Use stream mode for non-RSA algorithms (RSA doesn't work well with chunking)
                         if memory_mapped_dataset is None:
                             memory_mapped_dataset = MemoryMappedDataset(dataset_path)
                             
-                        # Create chunks for stream processing
+                        # Use streaming processing with chunked approach
                         chunk_size = 1024 * 1024  # 1MB chunks
-                        chunks = memory_mapped_dataset.create_chunks(chunk_size)
+                        total_chunks = (dataset_size_bytes + chunk_size - 1) // chunk_size
                         
-                        logger.info(f"Processing {len(chunks)} chunks of {chunk_size} bytes each using stream mode")
+                        logger.info(f"Processing {total_chunks} chunks of {chunk_size} bytes each using stream mode")
                         
-                        # Encryption with chunks
+                        # Collect all chunks first for proper measurement
+                        all_chunks = list(memory_mapped_dataset.create_chunks(chunk_size))
+                        
+                        # Use the proper measurement system for encryption
                         encrypted_chunks = measure_chunked_encryption(
-                            metrics, 
-                            implementation.encrypt, 
-                            implementation, 
-                            chunks, 
-                            key, 
+                            metrics,
+                            implementation.encrypt,
+                            implementation,
+                            all_chunks,
+                            key,
                             chunk_size
                         )
                         
-                        # Decryption with chunks
+                        # Use the proper measurement system for decryption
                         decrypted_chunks = measure_chunked_encryption(
-                            metrics, 
-                            implementation.decrypt, 
-                            implementation, 
-                            encrypted_chunks, 
-                            key, 
-                            chunk_size
+                            metrics,
+                            implementation.decrypt,
+                            implementation,
+                            encrypted_chunks,
+                            key,
+                            chunk_size,
+                            all_chunks  # Pass original chunks for correctness checking
                         )
                         
-                        # Verify correctness by comparing a sample of chunks
-                        correctness_checks = min(5, len(chunks))  # Check up to 5 chunks
+                        # Verify correctness by comparing chunks
+                        correctness_checks = min(5, len(all_chunks))  # Check up to 5 chunks
                         for check_idx in range(correctness_checks):
-                            if chunks[check_idx] != decrypted_chunks[check_idx]:
+                            if all_chunks[check_idx] != decrypted_chunks[check_idx]:
                                 logger.error(f"Correctness check failed for chunk {check_idx}")
                                 metrics.correctness_passed = False
                                 break
                         else:
                             metrics.correctness_passed = True
                             
-                        # Clean up
-                        del chunks
+                        # Set additional metrics
+                        metrics.input_size_bytes = dataset_size_bytes
+                        metrics.decrypted_size_bytes = sum(len(chunk) for chunk in decrypted_chunks)
+                        
+                        # Clean up chunks to free memory
+                        del all_chunks
                         del encrypted_chunks
                         del decrypted_chunks
                         gc.collect()
                         
                     else:
-                        # Memory mode: Load entire dataset
+                        # Memory mode: Load entire dataset (or force memory mode for RSA)
+                        if processing_strategy == "Stream" and 'rsa' in method_name.lower():
+                            logger.info(f"Using Memory mode for RSA algorithm (chunking not supported)")
+                        
                         if cached_dataset is None:
                             cached_dataset = load_dataset(dataset_path)
                         
@@ -486,13 +497,20 @@ def run_benchmarks(config, implementations):
                             cached_dataset  # Pass original plaintext for correctness checking
                         )
                         
-                        # Verify correctness
-                        if cached_dataset == plaintext:
-                            metrics.correctness_passed = True
-                            logger.info(f"Correctness check passed for {impl_description}")
-                        else:
-                            metrics.correctness_passed = False
-                            logger.error(f"Correctness check failed for {impl_description}")
+                        # The correctness check is handled by measure_decrypt in the metrics
+                        # But let's verify it was set correctly
+                        if not hasattr(metrics, 'correctness_passed') or metrics.correctness_passed is None:
+                            # Fallback verification
+                            if cached_dataset == plaintext:
+                                metrics.correctness_passed = True
+                                logger.info(f"Correctness check passed for {impl_description}")
+                            else:
+                                metrics.correctness_passed = False
+                                logger.error(f"Correctness check failed for {impl_description}")
+                        
+                        # Set additional metrics
+                        metrics.input_size_bytes = len(cached_dataset)
+                        metrics.decrypted_size_bytes = len(plaintext) if hasattr(plaintext, '__len__') else 0
                             
                         # Clean up
                         del ciphertext
