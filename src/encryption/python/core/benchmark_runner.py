@@ -270,12 +270,15 @@ def run_benchmarks(config, implementations):
                         std_settings["is_custom"] = False
                         
                         # Use specialized implementation names for different key sizes and modes
-                        if mode in ["CBC", "CTR", "GCM", "ECB"]:
+                        if mode in ["CBC", "CTR", "GCM", "ECB", "CFB", "OFB"]:
                             impl_name = f"camellia{key_size}_{mode.lower()}"
                             if impl_name in implementations:
                                 enabled_methods.append((impl_name, std_settings))
                             else:
                                 # Fallback to generic Camellia implementation
+                                enabled_methods.append((method_name, std_settings))
+                        else:
+                            # Fallback for other modes
                                 enabled_methods.append((method_name, std_settings))
                 
                 if use_custom:
@@ -283,12 +286,15 @@ def run_benchmarks(config, implementations):
                     custom_settings["is_custom"] = True
                     
                     # Use specialized custom implementation names for different key sizes and modes
-                    if mode in ["CBC", "CTR", "GCM", "ECB"]:
+                    if mode in ["CBC", "CTR", "GCM", "ECB", "CFB", "OFB"]:
                         custom_impl_name = f"camellia{key_size}_{mode.lower()}_custom"
                         if custom_impl_name in implementations:
                             enabled_methods.append((custom_impl_name, custom_settings))
                         else:
                             # Fallback to generic custom Camellia implementation
+                            enabled_methods.append(("camellia_custom", custom_settings))
+                    else:
+                        # Fallback for other modes
                             enabled_methods.append(("camellia_custom", custom_settings))
             elif method_name == "rsa":
                 # RSA implementations

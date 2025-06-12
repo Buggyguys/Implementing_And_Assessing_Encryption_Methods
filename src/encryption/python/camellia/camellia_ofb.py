@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-CryptoBench Pro - Camellia ECB Implementation
-Implements Camellia encryption/decryption in ECB mode.
-
-WARNING: ECB mode is not secure for most use cases as it does not provide
-semantic security. It is included for completeness and benchmarking purposes only.
+CryptoBench Pro - Camellia OFB Implementation
+Implements Camellia encryption/decryption in OFB mode.
 """
 
 import os
-import logging
 from .base import CamelliaImplementationBase
-from .key_utils import generate_key, pad_data, unpad_data
+from .key_utils import generate_key
+import logging
 
-class CamelliaECBImplementation(CamelliaImplementationBase):
-    """Camellia implementation in ECB mode (insecure for most use cases)."""
+class CamelliaOFBImplementation(CamelliaImplementationBase):
+    """Camellia implementation in OFB mode."""
     
     def __init__(self, key_size=256, **kwargs):
         """
@@ -30,21 +27,14 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
         # Set the is_custom flag before passing to super
         is_custom = kwargs.pop('is_custom', False) if 'is_custom' in kwargs else False
         
-        super().__init__(key_size=key_size, mode="ECB", is_custom=is_custom)
-        self.name = "Camellia-ECB"
-        self.description = f"{self.key_size}-bit Camellia-ECB (INSECURE)"
+        super().__init__(key_size=key_size, mode="OFB", is_custom=is_custom)
+        self.name = "Camellia-OFB"
+        self.description = f"{self.key_size}-bit Camellia-OFB"
         
         if self.is_custom:
             self.description = f"Custom {self.description}"
         else:
             self.description = f"Cryptography.io {self.description}"
-        
-        # Log a warning about ECB mode
-        logging.warning(
-            "WARNING: Camellia ECB mode is being used. ECB mode is not secure for most "
-            "use cases as it does not provide semantic security. It is included for "
-            "completeness and benchmarking purposes only."
-        )
     
     def generate_key(self):
         """
@@ -58,7 +48,7 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
     
     def encrypt(self, data, key=None):
         """
-        Encrypt data using Camellia in ECB mode.
+        Encrypt data using Camellia in OFB mode.
         
         Args:
             data: Data to encrypt
@@ -81,7 +71,7 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
     
     def decrypt(self, data, key=None):
         """
-        Decrypt data using Camellia in ECB mode.
+        Decrypt data using Camellia in OFB mode.
         
         Args:
             data: Data to decrypt
@@ -104,7 +94,7 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
     
     def _encrypt_stdlib(self, data, key):
         """
-        Encrypt data using the standard library in ECB mode.
+        Encrypt data using the standard library in OFB mode.
         
         Args:
             data: Data to encrypt
@@ -117,31 +107,33 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
             from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
             from cryptography.hazmat.backends import default_backend
             
-            # Add padding to ensure data length is a multiple of block size
-            padded_data = pad_data(data, 16)
+            # Generate a random IV
+            iv = os.urandom(16)
             
-            # Create encryptor
+            # Create cipher
             cipher = Cipher(
                 algorithms.Camellia(key),
-                modes.ECB(),
+                modes.OFB(iv),
                 backend=default_backend()
             )
             encryptor = cipher.encryptor()
             
             # Encrypt the data
-            ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+            ciphertext = encryptor.update(data) + encryptor.finalize()
             
-            # For ECB mode, we'll add a marker to indicate that this is ECB mode
-            # This is to prevent confusion with other modes when decrypting
-            return b'ECB:' + ciphertext
+            # Return the IV + ciphertext
+            return iv + ciphertext
             
         except ImportError:
-            # Fallback to custom implementation if the library is not available
-            return self._encrypt_custom(data, key)
+            logging.error("cryptography.io library not available for Camellia OFB")
+            raise NotImplementedError("Camellia OFB mode requires cryptography.io library")
+        except Exception as e:
+            logging.error(f"Error in OFB encrypt: {str(e)}")
+            return b''
     
     def _decrypt_stdlib(self, data, key):
         """
-        Decrypt data using the standard library in ECB mode.
+        Decrypt data using the standard library in OFB mode.
         
         Args:
             data: Data to decrypt
@@ -150,48 +142,40 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
         Returns:
             bytes: Decrypted data
         """
+        if len(data) < 16:
+            return b''  # Not enough data for IV
+        
         try:
-            if len(data) < 4:
-                raise ValueError("Invalid ciphertext length")
-            
-            # Check if the data has our ECB marker
-            if data.startswith(b'ECB:'):
-                ciphertext = data[4:]
-            else:
-                ciphertext = data
-            
             from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
             from cryptography.hazmat.backends import default_backend
             
-            # Create decryptor
+            # Extract IV and ciphertext
+            iv = data[:16]
+            ciphertext = data[16:]
+            
+            # Create cipher
             cipher = Cipher(
                 algorithms.Camellia(key),
-                modes.ECB(),
+                modes.OFB(iv),
                 backend=default_backend()
             )
             decryptor = cipher.decryptor()
             
             # Decrypt the data
-            padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+            plaintext = decryptor.update(ciphertext) + decryptor.finalize()
             
-            # Remove padding
-            try:
-                plaintext = unpad_data(padded_plaintext, 16)
-                return plaintext
-            except ValueError:
-                # Handle padding errors (common in stream mode)
-                return b''
-                
+            return plaintext
+            
         except ImportError:
-            # Fallback to custom implementation if the library is not available
-            return self._decrypt_custom(data, key)
-        except Exception:
-            # Handle other errors
+            logging.error("cryptography.io library not available for Camellia OFB")
+            raise NotImplementedError("Camellia OFB mode requires cryptography.io library")
+        except Exception as e:
+            logging.error(f"Error in OFB decrypt: {str(e)}")
             return b''
     
     def _encrypt_custom(self, data, key):
         """
-        Encrypt data using custom Camellia implementation in ECB mode.
+        Encrypt data using custom Camellia implementation in OFB mode.
         
         Args:
             data: Data to encrypt
@@ -201,25 +185,28 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
             bytes: Encrypted data
         """
         try:
-            from .custom_camellia import camellia_encrypt_ecb
+            from .custom_camellia import camellia_encrypt_ofb
             
-            # Encrypt using our custom implementation
-            ciphertext = camellia_encrypt_ecb(data, key)
+            # Generate a random IV
+            iv = os.urandom(16)
             
-            # Add ECB marker for consistency
-            return b'ECB:' + ciphertext
+            # Encrypt using custom implementation
+            ciphertext = camellia_encrypt_ofb(data, key, iv)
+            
+            # Return the IV + ciphertext
+            return iv + ciphertext
             
         except ImportError as e:
             logging.error(f"Custom Camellia implementation not available: {str(e)}")
             # Fallback to standard library
             return self._encrypt_stdlib(data, key)
         except Exception as e:
-            logging.error(f"Error in custom ECB encrypt: {str(e)}")
+            logging.error(f"Error in custom OFB encrypt: {str(e)}")
             return b''
     
     def _decrypt_custom(self, data, key):
         """
-        Decrypt data using custom Camellia implementation in ECB mode.
+        Decrypt data using custom Camellia implementation in OFB mode.
         
         Args:
             data: Data to decrypt
@@ -228,20 +215,18 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
         Returns:
             bytes: Decrypted data
         """
-        if len(data) < 4:
-            return b''  # Not enough data for ECB marker
+        if len(data) < 16:
+            return b''  # Not enough data for IV
         
         try:
-            from .custom_camellia import camellia_decrypt_ecb
+            from .custom_camellia import camellia_decrypt_ofb
             
-            # Check if the data has our ECB marker
-            if data.startswith(b'ECB:'):
-                ciphertext = data[4:]
-            else:
-                ciphertext = data
+            # Extract IV and ciphertext
+            iv = data[:16]
+            ciphertext = data[16:]
             
-            # Decrypt using our custom implementation
-            plaintext = camellia_decrypt_ecb(ciphertext, key)
+            # Decrypt using custom implementation
+            plaintext = camellia_decrypt_ofb(ciphertext, key, iv)
             
             return plaintext
             
@@ -250,5 +235,5 @@ class CamelliaECBImplementation(CamelliaImplementationBase):
             # Fallback to standard library
             return self._decrypt_stdlib(data, key)
         except Exception as e:
-            logging.error(f"Error in custom ECB decrypt: {str(e)}")
+            logging.error(f"Error in custom OFB decrypt: {str(e)}")
             return b'' 

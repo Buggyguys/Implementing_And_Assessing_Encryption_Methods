@@ -231,7 +231,7 @@ class CamelliaCBCImplementation(CamelliaImplementationBase):
     
     def _encrypt_custom(self, data, key):
         """
-        Encrypt data using a custom implementation in CBC mode.
+        Encrypt data using custom Camellia implementation in CBC mode.
         
         Args:
             data: Data to encrypt
@@ -240,34 +240,29 @@ class CamelliaCBCImplementation(CamelliaImplementationBase):
         Returns:
             bytes: Encrypted data
         """
-        # For the custom implementation, we'll use PyCryptodome if available,
-        # or fallback to our own implementation
         try:
-            from Crypto.Cipher import Camellia
-            from Crypto.Util.Padding import pad
+            from .custom_camellia import camellia_encrypt_cbc
             
             # Generate a random IV
             iv = os.urandom(16)
             
-            # Create cipher
-            cipher = Camellia.new(key, Camellia.MODE_CBC, iv)
-            
-            # Pad and encrypt
-            padded_data = pad(data, 16)
-            ciphertext = cipher.encrypt(padded_data)
+            # Encrypt using our custom implementation
+            ciphertext = camellia_encrypt_cbc(data, key, iv)
             
             # Return IV + ciphertext
             return iv + ciphertext
             
-        except ImportError:
-            # If PyCryptodome is not available, fallback to standard library
-            # This is because a full custom implementation of Camellia would be
-            # very complex and outside the scope of this project
+        except ImportError as e:
+            logging.error(f"Custom Camellia implementation not available: {str(e)}")
+            # Fallback to standard library
             return self._encrypt_stdlib(data, key)
+        except Exception as e:
+            logging.error(f"Error in custom CBC encrypt: {str(e)}")
+            return b''
     
     def _decrypt_custom(self, data, key):
         """
-        Decrypt data using a custom implementation in CBC mode.
+        Decrypt data using custom Camellia implementation in CBC mode.
         
         Args:
             data: Data to decrypt
@@ -277,31 +272,24 @@ class CamelliaCBCImplementation(CamelliaImplementationBase):
             bytes: Decrypted data
         """
         if len(data) < 16:
-            # Not enough data for IV
-            return b''
+            return b''  # Not enough data for IV
         
         try:
-            from Crypto.Cipher import Camellia
-            from Crypto.Util.Padding import unpad
+            from .custom_camellia import camellia_decrypt_cbc
             
             # Extract IV and ciphertext
             iv = data[:16]
             ciphertext = data[16:]
             
-            # Create cipher
-            cipher = Camellia.new(key, Camellia.MODE_CBC, iv)
+            # Decrypt using our custom implementation
+            plaintext = camellia_decrypt_cbc(ciphertext, key, iv)
             
-            # Decrypt
-            padded_plaintext = cipher.decrypt(ciphertext)
+            return plaintext
             
-            try:
-                # Remove padding
-                plaintext = unpad(padded_plaintext, 16)
-                return plaintext
-            except Exception:
-                # Handle padding errors (common in stream mode)
+        except ImportError as e:
+            logging.error(f"Custom Camellia implementation not available: {str(e)}")
+            # Fallback to standard library
+            return self._decrypt_stdlib(data, key)
+        except Exception as e:
+            logging.error(f"Error in custom CBC decrypt: {str(e)}")
                 return b''
-                
-        except ImportError:
-            # If PyCryptodome is not available, fallback to standard library
-            return self._decrypt_stdlib(data, key) 

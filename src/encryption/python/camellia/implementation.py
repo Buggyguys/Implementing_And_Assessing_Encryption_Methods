@@ -28,13 +28,13 @@ def register_camellia_variant(name):
 class CamelliaImplementation(CamelliaImplementationBase):
     """Camellia implementation using both standard library and custom approaches."""
     
-    def __init__(self, key_size=256, mode="GCM", **kwargs):
+    def __init__(self, key_size=256, mode="CBC", **kwargs):
         """
         Initialize with key size and mode.
         
         Args:
             key_size: Key size in bits (128, 192, or 256)
-            mode: Mode of operation (CBC, CTR, GCM, ECB)
+            mode: Mode of operation (CBC, ECB, CFB, OFB)
             **kwargs: Additional keyword arguments
         """
         # Remove is_custom from kwargs if it exists to avoid conflicts
@@ -92,15 +92,15 @@ class CamelliaImplementation(CamelliaImplementationBase):
         if mode_lower == "cbc":
             from .camellia_cbc import CamelliaCBCImplementation
             impl = CamelliaCBCImplementation(key_size=self.key_size, is_custom=self.is_custom)
-        elif mode_lower == "ctr":
-            from .camellia_ctr import CamelliaCTRImplementation
-            impl = CamelliaCTRImplementation(key_size=self.key_size, is_custom=self.is_custom)
-        elif mode_lower == "gcm":
-            from .camellia_gcm import CamelliaGCMImplementation
-            impl = CamelliaGCMImplementation(key_size=self.key_size, is_custom=self.is_custom)
         elif mode_lower == "ecb":
             from .camellia_ecb import CamelliaECBImplementation
             impl = CamelliaECBImplementation(key_size=self.key_size, is_custom=self.is_custom)
+        elif mode_lower == "cfb":
+            from .camellia_cfb import CamelliaCFBImplementation
+            impl = CamelliaCFBImplementation(key_size=self.key_size, is_custom=self.is_custom)
+        elif mode_lower == "ofb":
+            from .camellia_ofb import CamelliaOFBImplementation
+            impl = CamelliaOFBImplementation(key_size=self.key_size, is_custom=self.is_custom)
         else:
             raise ValueError(f"Unsupported mode: {self.mode}")
         
@@ -129,15 +129,15 @@ class CamelliaImplementation(CamelliaImplementationBase):
         if mode_lower == "cbc":
             from .camellia_cbc import CamelliaCBCImplementation
             impl = CamelliaCBCImplementation(key_size=self.key_size, is_custom=self.is_custom)
-        elif mode_lower == "ctr":
-            from .camellia_ctr import CamelliaCTRImplementation
-            impl = CamelliaCTRImplementation(key_size=self.key_size, is_custom=self.is_custom)
-        elif mode_lower == "gcm":
-            from .camellia_gcm import CamelliaGCMImplementation
-            impl = CamelliaGCMImplementation(key_size=self.key_size, is_custom=self.is_custom)
         elif mode_lower == "ecb":
             from .camellia_ecb import CamelliaECBImplementation
             impl = CamelliaECBImplementation(key_size=self.key_size, is_custom=self.is_custom)
+        elif mode_lower == "cfb":
+            from .camellia_cfb import CamelliaCFBImplementation
+            impl = CamelliaCFBImplementation(key_size=self.key_size, is_custom=self.is_custom)
+        elif mode_lower == "ofb":
+            from .camellia_ofb import CamelliaOFBImplementation
+            impl = CamelliaOFBImplementation(key_size=self.key_size, is_custom=self.is_custom)
         else:
             raise ValueError(f"Unsupported mode: {self.mode}")
         
@@ -150,13 +150,13 @@ class CamelliaImplementation(CamelliaImplementationBase):
         return impl.decrypt(data, key)
 
 
-def create_stdlib_camellia_implementation(key_size=256, mode="GCM", **kwargs):
+def create_stdlib_camellia_implementation(key_size=256, mode="CBC", **kwargs):
     """
     Create a standard library Camellia implementation.
     
     Args:
         key_size: Key size in bits (128, 192, or 256)
-        mode: Mode of operation (CBC, CTR, GCM, ECB)
+        mode: Mode of operation (CBC, ECB, CFB, OFB)
         **kwargs: Additional keyword arguments
         
     Returns:
@@ -171,28 +171,28 @@ def create_stdlib_camellia_implementation(key_size=256, mode="GCM", **kwargs):
     if mode == "CBC":
         from .camellia_cbc import CamelliaCBCImplementation
         return CamelliaCBCImplementation(key_size=key_size, is_custom=False, **kwargs)
-    elif mode == "CTR":
-        from .camellia_ctr import CamelliaCTRImplementation
-        return CamelliaCTRImplementation(key_size=key_size, is_custom=False, **kwargs)
-    elif mode == "GCM":
-        from .camellia_gcm import CamelliaGCMImplementation
-        return CamelliaGCMImplementation(key_size=key_size, is_custom=False, **kwargs)
     elif mode == "ECB":
         from .camellia_ecb import CamelliaECBImplementation
         return CamelliaECBImplementation(key_size=key_size, is_custom=False, **kwargs)
+    elif mode == "CFB":
+        from .camellia_cfb import CamelliaCFBImplementation
+        return CamelliaCFBImplementation(key_size=key_size, is_custom=False, **kwargs)
+    elif mode == "OFB":
+        from .camellia_ofb import CamelliaOFBImplementation
+        return CamelliaOFBImplementation(key_size=key_size, is_custom=False, **kwargs)
     else:
         # Fallback to generic implementation
         logger.debug(f"Unsupported mode '{mode}' for Camellia. Using generic implementation.")
         return CamelliaImplementation(key_size=key_size, mode=mode, is_custom=False, **kwargs)
 
 
-def create_custom_camellia_implementation(key_size=256, mode="GCM", **kwargs):
+def create_custom_camellia_implementation(key_size=256, mode="CBC", **kwargs):
     """
     Create a custom Camellia implementation.
     
     Args:
         key_size: Key size in bits (128, 192, or 256)
-        mode: Mode of operation (CBC, CTR, GCM, ECB)
+        mode: Mode of operation (CBC, ECB, CFB, OFB)
         **kwargs: Additional keyword arguments
         
     Returns:
@@ -207,15 +207,15 @@ def create_custom_camellia_implementation(key_size=256, mode="GCM", **kwargs):
     if mode == "CBC":
         from .camellia_cbc import CamelliaCBCImplementation
         return CamelliaCBCImplementation(key_size=key_size, is_custom=True, **kwargs)
-    elif mode == "CTR":
-        from .camellia_ctr import CamelliaCTRImplementation
-        return CamelliaCTRImplementation(key_size=key_size, is_custom=True, **kwargs)
-    elif mode == "GCM":
-        from .camellia_gcm import CamelliaGCMImplementation
-        return CamelliaGCMImplementation(key_size=key_size, is_custom=True, **kwargs)
     elif mode == "ECB":
         from .camellia_ecb import CamelliaECBImplementation
         return CamelliaECBImplementation(key_size=key_size, is_custom=True, **kwargs)
+    elif mode == "CFB":
+        from .camellia_cfb import CamelliaCFBImplementation
+        return CamelliaCFBImplementation(key_size=key_size, is_custom=True, **kwargs)
+    elif mode == "OFB":
+        from .camellia_ofb import CamelliaOFBImplementation
+        return CamelliaOFBImplementation(key_size=key_size, is_custom=True, **kwargs)
     else:
         # Fallback to generic implementation
         logger.debug(f"Unsupported mode '{mode}' for Camellia. Using generic implementation.")
@@ -229,7 +229,7 @@ def register_all_camellia_variants():
         key_size_str = str(key_size)
         
         # Register standard library implementations
-        for mode in ["CBC", "CTR", "GCM", "ECB"]:
+        for mode in ["CBC", "ECB", "CFB", "OFB"]:
             mode_lower = mode.lower()
             variant_name = f"camellia{key_size_str}_{mode_lower}"
             
@@ -244,7 +244,7 @@ def register_all_camellia_variants():
             CAMELLIA_IMPLEMENTATIONS[variant_name] = make_std_factory()
         
         # Register custom implementations
-        for mode in ["CBC", "CTR", "GCM", "ECB"]:
+        for mode in ["CBC", "ECB", "CFB", "OFB"]:
             mode_lower = mode.lower()
             variant_name = f"camellia{key_size_str}_{mode_lower}_custom"
             
@@ -261,6 +261,6 @@ def register_all_camellia_variants():
     # Register general custom implementation
     CAMELLIA_IMPLEMENTATIONS["camellia_custom"] = lambda **kwargs: create_custom_camellia_implementation(
         key_size=int(kwargs.pop("key_size", 256)),
-        mode=kwargs.pop("mode", "GCM"),
+        mode=kwargs.pop("mode", "CBC"),
         **kwargs
     ) 

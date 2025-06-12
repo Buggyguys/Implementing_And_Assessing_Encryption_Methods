@@ -392,7 +392,7 @@ class ConfigurationTab(QWidget):
         # Button signals
         self.save_config_btn.clicked.connect(self._save_config)
         self.load_config_btn.clicked.connect(self._load_config)
-        self.start_tests_btn.clicked.connect(self._start_tests)
+        # NOTE: start_tests_btn connection already done in _create_control_buttons()
         
         # Checkbox signals
         self.sym_aes_check.toggled.connect(lambda checked: self.sym_aes_key_size_combo.setEnabled(checked))
