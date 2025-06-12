@@ -5,7 +5,7 @@ Implements AES encryption/decryption with different key sizes and modes using a 
 """
 
 from .base import AESImplementationBase
-from . import aes_gcm, aes_cbc, aes_ctr, aes_ecb
+from . import aes_gcm, aes_cbc, aes_cfb, aes_ofb
 
 # Dictionary to track implementations
 AES_IMPLEMENTATIONS = {}
@@ -39,10 +39,10 @@ class AESImplementation(AESImplementationBase):
             return aes_gcm.encrypt(data, key, None, self.is_custom)
         elif self.mode == "CBC":
             return aes_cbc.encrypt(data, key, None, self.is_custom)
-        elif self.mode == "CTR":
-            return aes_ctr.encrypt(data, key, None, self.is_custom)
-        elif self.mode == "ECB":
-            return aes_ecb.encrypt(data, key, None, self.is_custom)
+        elif self.mode == "CFB":
+            return aes_cfb.encrypt(data, key, None, self.is_custom)
+        elif self.mode == "OFB":
+            return aes_ofb.encrypt(data, key, None, self.is_custom)
         else:
             raise ValueError(f"Unsupported AES mode: {self.mode}")
     
@@ -53,10 +53,10 @@ class AESImplementation(AESImplementationBase):
             return aes_gcm.decrypt(ciphertext, key, self.is_custom)
         elif self.mode == "CBC":
             return aes_cbc.decrypt(ciphertext, key, self.is_custom)
-        elif self.mode == "CTR":
-            return aes_ctr.decrypt(ciphertext, key, self.is_custom)
-        elif self.mode == "ECB":
-            return aes_ecb.decrypt(ciphertext, key, self.is_custom)
+        elif self.mode == "CFB":
+            return aes_cfb.decrypt(ciphertext, key, self.is_custom)
+        elif self.mode == "OFB":
+            return aes_ofb.decrypt(ciphertext, key, self.is_custom)
         else:
             raise ValueError(f"Unsupported AES mode: {self.mode}")
 
@@ -72,7 +72,7 @@ def register_all_aes_variants():
     """Register all AES variants."""
     # Different key sizes and modes
     for key_size in ["128", "192", "256"]:
-        for mode in ["GCM", "CBC", "CTR", "ECB"]:
+        for mode in ["GCM", "CBC", "CFB", "OFB"]:
             variant_name = f"aes{key_size}_{mode.lower()}"
             AES_IMPLEMENTATIONS[variant_name] = lambda ks=key_size, m=mode, **kwargs: AESImplementation(
                 key_size=ks, mode=m, **kwargs

@@ -149,11 +149,14 @@ class CamelliaGCMImplementation(CamelliaImplementationBase):
         Returns:
             bytes: Encrypted data
         """
-        # For Camellia-GCM, standard library mode is not supported
-        # This should never be called directly as the benchmark runner will skip it,
-        # but we include it for completeness and to handle unexpected calls
-        logger.warning("Camellia-GCM is not supported in standard library mode")
-        raise ValueError("Camellia-GCM is not supported in standard library mode. Please use custom implementation.")
+        # Camellia-GCM is not supported by standard libraries (cryptography.io/PyCryptodome)
+        # PyCryptodome: Doesn't include Camellia cipher at all
+        # cryptography.io: Supports Camellia but not in GCM mode
+        logger.warning("Camellia-GCM is not supported in standard library mode - "
+                      "neither PyCryptodome nor cryptography.io support Camellia-GCM")
+        raise ValueError("Camellia-GCM is not supported in standard library mode. "
+                        "Standard libraries only support Camellia in CBC, ECB, OFB, and CFB modes. "
+                        "Please use custom implementation for GCM mode or change to a supported mode.")
     
     def _decrypt_stdlib(self, data, key):
         """
@@ -166,11 +169,14 @@ class CamelliaGCMImplementation(CamelliaImplementationBase):
         Returns:
             bytes: Decrypted data
         """
-        # For Camellia-GCM, standard library mode is not supported
-        # This should never be called directly as the benchmark runner will skip it,
-        # but we include it for completeness and to handle unexpected calls
-        logger.warning("Camellia-GCM is not supported in standard library mode")
-        raise ValueError("Camellia-GCM is not supported in standard library mode. Please use custom implementation.")
+        # Camellia-GCM is not supported by standard libraries (cryptography.io/PyCryptodome)
+        # PyCryptodome: Doesn't include Camellia cipher at all
+        # cryptography.io: Supports Camellia but not in GCM mode
+        logger.warning("Camellia-GCM is not supported in standard library mode - "
+                      "neither PyCryptodome nor cryptography.io support Camellia-GCM")
+        raise ValueError("Camellia-GCM is not supported in standard library mode. "
+                        "Standard libraries only support Camellia in CBC, ECB, OFB, and CFB modes. "
+                        "Please use custom implementation for GCM mode or change to a supported mode.")
     
     def _encrypt_custom(self, data, key):
         """

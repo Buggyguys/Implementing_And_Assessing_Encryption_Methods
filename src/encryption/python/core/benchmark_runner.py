@@ -123,7 +123,24 @@ def run_benchmarks(config, implementations):
     
     # Extract test parameters
     iterations = config["test_parameters"]["iterations"]
-    dataset_path = config["test_parameters"]["dataset_path"]
+    
+    # Handle both old and new dataset configuration formats
+    dataset_info = config["test_parameters"].get("dataset_info")
+    if dataset_info:
+        # New format with separate symmetric/asymmetric datasets
+        symmetric_dataset_path = dataset_info.get("symmetric", {}).get("path")
+        asymmetric_dataset_path = dataset_info.get("asymmetric", {}).get("path")
+        logger.info(f"Using new dual dataset format:")
+        if symmetric_dataset_path:
+            logger.info(f"  Symmetric dataset: {symmetric_dataset_path}")
+        if asymmetric_dataset_path:
+            logger.info(f"  Asymmetric dataset: {asymmetric_dataset_path}")
+    else:
+        # Old format with single dataset path (for backward compatibility)
+        dataset_path = config["test_parameters"].get("dataset_path")
+        symmetric_dataset_path = dataset_path
+        asymmetric_dataset_path = dataset_path
+        logger.info(f"Using legacy single dataset format: {dataset_path}")
     
     # Configuration parameters
     use_stdlib = config["test_parameters"].get("use_stdlib", True)
@@ -173,23 +190,40 @@ def run_benchmarks(config, implementations):
     use_mmap = False  # Disable memory mapping completely to use full in-memory loading
     
     # Initialize variables to avoid UnboundLocalError
-    cached_dataset = None
-    memory_mapped_dataset = None
+    cached_symmetric_dataset = None
+    cached_asymmetric_dataset = None
+    memory_mapped_symmetric_dataset = None
+    memory_mapped_asymmetric_dataset = None
     
-    # Load dataset based on processing strategy
+    # Load datasets based on processing strategy
     if processing_strategy == "Memory":
-        # Memory mode: Load entire dataset
-        cached_dataset = load_dataset(dataset_path)
-        if cached_dataset is None:
-            logger.error("Failed to load dataset. Aborting.")
-            return False
-        dataset_size_bytes = len(cached_dataset)
-        logger.info(f"Dataset loaded successfully: {dataset_size_bytes / (1024*1024):.2f} MB")
+        # Memory mode: Load entire datasets
+        if symmetric_dataset_path:
+            cached_symmetric_dataset = load_dataset(symmetric_dataset_path)
+            if cached_symmetric_dataset is None:
+                logger.error("Failed to load symmetric dataset. Aborting.")
+                return False
+            symmetric_size_bytes = len(cached_symmetric_dataset)
+            logger.info(f"Symmetric dataset loaded successfully: {symmetric_size_bytes / (1024*1024):.2f} MB")
+        
+        if asymmetric_dataset_path:
+            cached_asymmetric_dataset = load_dataset(asymmetric_dataset_path)
+            if cached_asymmetric_dataset is None:
+                logger.error("Failed to load asymmetric dataset. Aborting.")
+                return False
+            asymmetric_size_bytes = len(cached_asymmetric_dataset)
+            logger.info(f"Asymmetric dataset loaded successfully: {asymmetric_size_bytes / (1024*1024):.2f} MB")
     else:
-        # Stream mode: Use memory-mapped dataset
-        memory_mapped_dataset = MemoryMappedDataset(dataset_path)
-        dataset_size_bytes = os.path.getsize(dataset_path)
-        logger.info(f"Memory-mapped dataset initialized for stream processing: {dataset_size_bytes / (1024*1024):.2f} MB")
+        # Stream mode: Use memory-mapped datasets
+        if symmetric_dataset_path:
+            memory_mapped_symmetric_dataset = MemoryMappedDataset(symmetric_dataset_path)
+            symmetric_size_bytes = os.path.getsize(symmetric_dataset_path)
+            logger.info(f"Memory-mapped symmetric dataset initialized: {symmetric_size_bytes / (1024*1024):.2f} MB")
+        
+        if asymmetric_dataset_path:
+            memory_mapped_asymmetric_dataset = MemoryMappedDataset(asymmetric_dataset_path)
+            asymmetric_size_bytes = os.path.getsize(asymmetric_dataset_path)
+            logger.info(f"Memory-mapped asymmetric dataset initialized: {asymmetric_size_bytes / (1024*1024):.2f} MB")
     
     # Get enabled encryption methods
     enabled_methods = []
@@ -227,13 +261,16 @@ def run_benchmarks(config, implementations):
                 if use_stdlib:
                     # Special case: Skip Camellia-GCM for standard library mode
                     if mode == "GCM":
-                        logger.warning(f"Skipping Camellia-GCM in standard library mode - not supported")
+                        logger.warning(f"Skipping Camellia-GCM in standard library mode - GCM mode is not supported by standard libraries.")
+                        logger.info(f"Camellia-GCM limitation: PyCryptodome doesn't include Camellia cipher, and cryptography.io supports Camellia but not in GCM mode.")
+                        logger.info(f"To test both standard and custom Camellia implementations, use CBC, ECB, OFB, or CFB mode instead.")
+                        logger.info(f"Supported Camellia modes in standard libraries: CBC, ECB, OFB, CFB")
                     else:
                         std_settings = method_settings.copy()
                         std_settings["is_custom"] = False
                         
                         # Use specialized implementation names for different key sizes and modes
-                        if mode in ["CBC", "CTR", "ECB"]:
+                        if mode in ["CBC", "CTR", "GCM", "ECB"]:
                             impl_name = f"camellia{key_size}_{mode.lower()}"
                             if impl_name in implementations:
                                 enabled_methods.append((impl_name, std_settings))
@@ -325,9 +362,15 @@ def run_benchmarks(config, implementations):
         "timestamp": datetime.now().isoformat(),
         "session_id": session_id,
         "language": "python",
-        "dataset": {
-            "path": dataset_path,
-            "size_bytes": dataset_size_bytes
+        "datasets": {
+            "symmetric": {
+                "path": symmetric_dataset_path,
+                "size_bytes": symmetric_size_bytes if symmetric_dataset_path else 0
+            },
+            "asymmetric": {
+                "path": asymmetric_dataset_path,
+                "size_bytes": asymmetric_size_bytes if asymmetric_dataset_path else 0
+            }
         },
         "test_configuration": {
             "iterations": iterations,
@@ -414,20 +457,48 @@ def run_benchmarks(config, implementations):
                         key_size_bytes = get_key_size_bytes(key, implementation)
                         metrics.set_algorithm_metadata(implementation, key_size_bytes)
                     
+                    # Determine if this is a symmetric or asymmetric algorithm
+                    is_asymmetric = any(keyword in method_name.lower() for keyword in ['rsa', 'ecc'])
+                    
+                    # Select appropriate dataset based on algorithm type
+                    if is_asymmetric:
+                        current_dataset_path = asymmetric_dataset_path
+                        current_cached_dataset = cached_asymmetric_dataset
+                        current_memory_mapped_dataset = memory_mapped_asymmetric_dataset
+                        current_dataset_size = asymmetric_size_bytes if asymmetric_dataset_path else 0
+                        dataset_type = "asymmetric"
+                    else:
+                        current_dataset_path = symmetric_dataset_path
+                        current_cached_dataset = cached_symmetric_dataset
+                        current_memory_mapped_dataset = memory_mapped_symmetric_dataset
+                        current_dataset_size = symmetric_size_bytes if symmetric_dataset_path else 0
+                        dataset_type = "symmetric"
+                    
+                    # Check if we have the required dataset for this algorithm type
+                    if not current_dataset_path:
+                        logger.warning(f"No {dataset_type} dataset available for {impl_description}. Skipping.")
+                        continue
+                    
+                    logger.info(f"Using {dataset_type} dataset for {impl_description}: {current_dataset_path}")
+                    
                     # Load or map dataset based on processing strategy
-                    if processing_strategy == "Stream" and not ('rsa' in method_name.lower()):
-                        # Use stream mode for non-RSA algorithms (RSA doesn't work well with chunking)
-                        if memory_mapped_dataset is None:
-                            memory_mapped_dataset = MemoryMappedDataset(dataset_path)
+                    if processing_strategy == "Stream" and not is_asymmetric:
+                        # Use stream mode for symmetric algorithms (asymmetric doesn't work well with chunking)
+                        if current_memory_mapped_dataset is None:
+                            current_memory_mapped_dataset = MemoryMappedDataset(current_dataset_path)
+                            if is_asymmetric:
+                                memory_mapped_asymmetric_dataset = current_memory_mapped_dataset
+                            else:
+                                memory_mapped_symmetric_dataset = current_memory_mapped_dataset
                             
                         # Use streaming processing with chunked approach
                         chunk_size = 1024 * 1024  # 1MB chunks
-                        total_chunks = (dataset_size_bytes + chunk_size - 1) // chunk_size
+                        total_chunks = (current_dataset_size + chunk_size - 1) // chunk_size
                         
                         logger.info(f"Processing {total_chunks} chunks of {chunk_size} bytes each using stream mode")
                         
                         # Collect all chunks first for proper measurement
-                        all_chunks = list(memory_mapped_dataset.create_chunks(chunk_size))
+                        all_chunks = list(current_memory_mapped_dataset.create_chunks(chunk_size))
                         
                         # Use the proper measurement system for encryption
                         encrypted_chunks = measure_chunked_encryption(
@@ -461,7 +532,7 @@ def run_benchmarks(config, implementations):
                             metrics.correctness_passed = True
                             
                         # Set additional metrics
-                        metrics.input_size_bytes = dataset_size_bytes
+                        metrics.input_size_bytes = current_dataset_size
                         metrics.decrypted_size_bytes = sum(len(chunk) for chunk in decrypted_chunks)
                         
                         # Clean up chunks to free memory
@@ -471,19 +542,24 @@ def run_benchmarks(config, implementations):
                         gc.collect()
                         
                     else:
-                        # Memory mode: Load entire dataset (or force memory mode for RSA)
-                        if processing_strategy == "Stream" and 'rsa' in method_name.lower():
-                            logger.info(f"Using Memory mode for RSA algorithm (chunking not supported)")
+                        # Memory mode: Load entire dataset (or force memory mode for asymmetric algorithms)
+                        if processing_strategy == "Stream" and is_asymmetric:
+                            logger.info(f"Using Memory mode for {dataset_type} algorithm (chunking not recommended)")
                         
-                        if cached_dataset is None:
-                            cached_dataset = load_dataset(dataset_path)
+                        if current_cached_dataset is None:
+                            current_cached_dataset = load_dataset(current_dataset_path)
+                            # Update the appropriate cached dataset variable
+                            if is_asymmetric:
+                                cached_asymmetric_dataset = current_cached_dataset
+                            else:
+                                cached_symmetric_dataset = current_cached_dataset
                         
                         # Perform encryption
                         ciphertext = measure_encryption_metrics(
                             metrics, 
                             implementation.encrypt, 
                             implementation, 
-                            cached_dataset, 
+                            current_cached_dataset, 
                             key
                         )
                         
@@ -494,14 +570,14 @@ def run_benchmarks(config, implementations):
                             implementation, 
                             ciphertext, 
                             key,
-                            cached_dataset  # Pass original plaintext for correctness checking
+                            current_cached_dataset  # Pass original plaintext for correctness checking
                         )
                         
                         # The correctness check is handled by measure_decrypt in the metrics
                         # But let's verify it was set correctly
                         if not hasattr(metrics, 'correctness_passed') or metrics.correctness_passed is None:
                             # Fallback verification
-                            if cached_dataset == plaintext:
+                            if current_cached_dataset == plaintext:
                                 metrics.correctness_passed = True
                                 logger.info(f"Correctness check passed for {impl_description}")
                             else:
@@ -509,7 +585,7 @@ def run_benchmarks(config, implementations):
                                 logger.error(f"Correctness check failed for {impl_description}")
                         
                         # Set additional metrics
-                        metrics.input_size_bytes = len(cached_dataset)
+                        metrics.input_size_bytes = len(current_cached_dataset)
                         metrics.decrypted_size_bytes = len(plaintext) if hasattr(plaintext, '__len__') else 0
                             
                         # Clean up
@@ -535,7 +611,7 @@ def run_benchmarks(config, implementations):
                 gc.collect()
             
             # Calculate aggregated metrics
-            aggregated_metrics = calculate_aggregated_metrics(iteration_results, dataset_size_bytes)
+            aggregated_metrics = calculate_aggregated_metrics(iteration_results, current_dataset_size)
             
             # Add to results
             results["encryption_results"][impl_name] = {
@@ -556,10 +632,14 @@ def run_benchmarks(config, implementations):
     if memory_tracking:
         tracemalloc.stop()
     
-    # Clean up memory-mapped dataset if used
-    if memory_mapped_dataset is not None:
-        memory_mapped_dataset.close()
-        logger.info("Closed memory-mapped dataset")
+    # Clean up memory-mapped datasets if used
+    if memory_mapped_symmetric_dataset is not None:
+        memory_mapped_symmetric_dataset.close()
+        logger.info("Closed memory-mapped symmetric dataset")
+    
+    if memory_mapped_asymmetric_dataset is not None:
+        memory_mapped_asymmetric_dataset.close()
+        logger.info("Closed memory-mapped asymmetric dataset")
     
     # Save results
     session_id = os.path.basename(session_dir)  # Extract session name from path

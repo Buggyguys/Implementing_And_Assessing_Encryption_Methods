@@ -19,8 +19,8 @@ from .key_utils import generate_key, get_iv, format_key_size
 # Mode-specific modules - makes them directly accessible
 from . import aes_gcm
 from . import aes_cbc
-from . import aes_ctr
-from . import aes_ecb
+from . import aes_cfb
+from . import aes_ofb
 
 # Ensure all variants are registered
 register_all_aes_variants() 

@@ -167,7 +167,7 @@ class ConfigurationTab(QWidget):
         
         aes_layout.addWidget(QLabel("Mode:"))
         self.sym_aes_mode_combo = QComboBox()
-        self.sym_aes_mode_combo.addItems(["CBC", "CTR", "GCM", "ECB"])
+        self.sym_aes_mode_combo.addItems(["CBC", "CFB", "OFB", "GCM"])
         self.sym_aes_mode_combo.setCurrentText("GCM")
         aes_layout.addWidget(self.sym_aes_mode_combo)
         
@@ -194,8 +194,8 @@ class ConfigurationTab(QWidget):
         
         camellia_layout.addWidget(QLabel("Mode:"))
         self.sym_camellia_mode_combo = QComboBox()
-        self.sym_camellia_mode_combo.addItems(["CBC", "CTR", "GCM", "ECB"])
-        self.sym_camellia_mode_combo.setCurrentText("GCM")
+        self.sym_camellia_mode_combo.addItems(["CBC", "ECB", "CFB", "OFB"])
+        self.sym_camellia_mode_combo.setCurrentText("CBC")
         camellia_layout.addWidget(self.sym_camellia_mode_combo)
         
         camellia_layout.addStretch()

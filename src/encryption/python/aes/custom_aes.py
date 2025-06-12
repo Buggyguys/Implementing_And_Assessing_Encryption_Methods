@@ -4,7 +4,7 @@ CryptoBench Pro - Custom AES Implementation
 Provides a pure Python implementation of AES encryption algorithm.
 """
 
-from src.encryption.python.aes.mix_cols import (
+from .mix_cols import (
     S_BOX, INV_S_BOX, RCON, 
     MIX_COL_2, MIX_COL_3, MIX_COL_9, MIX_COL_11, MIX_COL_13, MIX_COL_14
 )
