@@ -20,7 +20,7 @@ from src.encryption.python.rsa.implementation import RSAImplementation, create_c
 from src.encryption.python.ecc.implementation import ECCImplementation, create_custom_ecc_implementation
 
 # Import Camellia implementations
-from src.encryption.python.camellia.implementation import CamelliaImplementation, create_custom_camellia_implementation
+from src.encryption.python.camellia import CamelliaImplementation, register_camellia_implementations
 
 __all__ = [
     'register_all_implementations',
@@ -34,7 +34,7 @@ __all__ = [
     'ECCImplementation',
     'create_custom_ecc_implementation',
     'CamelliaImplementation',
-    'create_custom_camellia_implementation'
+    'register_camellia_implementations'
 ]
 
 # We'll let python_core import and register the implementations
