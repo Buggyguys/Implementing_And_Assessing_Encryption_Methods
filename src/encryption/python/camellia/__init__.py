@@ -1,27 +1,9 @@
-#!/usr/bin/env python3
-"""
-Camellia Encryption Implementation
-A complete implementation of the Camellia block cipher supporting all key sizes and modes.
-"""
-
 from .camellia_implementation import CamelliaImplementation
 
-# Export the main implementation
+# export main implementation
 __all__ = ['CamelliaImplementation', 'get_camellia_implementation', 'register_camellia_implementations']
 
 def get_camellia_implementation(key_size=256, mode="CBC", is_custom=False, **kwargs):
-    """
-    Get a Camellia implementation with specified parameters.
-    
-    Args:
-        key_size: Key size in bits (128, 192, or 256)
-        mode: Mode of operation (CBC, ECB, CFB, OFB)
-        is_custom: Whether to use custom implementation (True) or standard library (False)
-        **kwargs: Additional arguments
-        
-    Returns:
-        CamelliaImplementation: Configured Camellia implementation
-    """
     return CamelliaImplementation(
         key_size=key_size,
         mode=mode,
@@ -30,16 +12,12 @@ def get_camellia_implementation(key_size=256, mode="CBC", is_custom=False, **kwa
     )
 
 def register_camellia_implementations():
-    """
-    Register all Camellia implementations with the benchmarking system.
-    This function should be called by the main Python encryption module.
-    """
     implementations = {}
     
-    # Register all combinations of key sizes and modes
+    # get combinations of key sizes and modes
     for key_size in [128, 192, 256]:
         for mode in ["CBC", "ECB", "CFB", "OFB"]:
-            # Standard library implementation
+            # stdlib
             std_name = f"camellia{key_size}_{mode.lower()}"
             implementations[std_name] = lambda ks=key_size, m=mode, **kwargs: CamelliaImplementation(
                 key_size=ks,
@@ -48,7 +26,7 @@ def register_camellia_implementations():
                 **{k: v for k, v in kwargs.items() if k not in ['key_size', 'mode', 'is_custom']}
             )
             
-            # Custom implementation
+            # custom
             custom_name = f"camellia{key_size}_{mode.lower()}_custom"
             implementations[custom_name] = lambda ks=key_size, m=mode, **kwargs: CamelliaImplementation(
                 key_size=ks,
@@ -57,7 +35,7 @@ def register_camellia_implementations():
                 **{k: v for k, v in kwargs.items() if k not in ['key_size', 'mode', 'is_custom']}
             )
     
-    # Also register generic implementations for backward compatibility
+    # generic implementations for backward compatibility
     implementations["camellia"] = lambda **kwargs: CamelliaImplementation(
         is_custom=False, 
         **{k: v for k, v in kwargs.items() if k != 'is_custom'}
@@ -69,7 +47,7 @@ def register_camellia_implementations():
     
     return implementations
 
-# For backward compatibility and easy access
+#  used for backward compatibility and easy access
 def create_camellia_cbc_128(**kwargs):
     """Create Camellia CBC 128-bit implementation."""
     return CamelliaImplementation(key_size=128, mode="CBC", **kwargs)

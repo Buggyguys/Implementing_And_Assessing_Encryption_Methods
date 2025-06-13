@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""
-Camellia Implementation
-Main implementation class that integrates with the benchmarking system.
-Supports both custom and standard library implementations.
-"""
-
 import os
 import logging
 from .camellia_modes import CamelliaModes
@@ -13,31 +6,21 @@ from .camellia_utils import generate_key, validate_key_size
 logger = logging.getLogger(__name__)
 
 class CamelliaImplementation:
-    """Main Camellia implementation class."""
     
     def __init__(self, key_size=256, mode="CBC", is_custom=False, **kwargs):
-        """
-        Initialize Camellia implementation.
-        
-        Args:
-            key_size: Key size in bits (128, 192, or 256)
-            mode: Mode of operation (CBC, ECB, CFB, OFB)
-            is_custom: Whether to use custom implementation (True) or standard library (False)
-            **kwargs: Additional arguments
-        """
         self.key_size = key_size
         self.mode = mode.upper()
         self.is_custom = is_custom
         self.encryption_key = None
         
-        # Validate parameters
+        # validate parameters
         if self.key_size not in [128, 192, 256]:
             raise ValueError(f"Invalid key size: {self.key_size} bits. Must be 128, 192, or 256.")
         
         if self.mode not in ["CBC", "ECB", "CFB", "OFB"]:
             raise ValueError(f"Invalid mode: {self.mode}. Must be CBC, ECB, CFB, or OFB.")
         
-        # Set description
+        # set description
         impl_type = "Custom" if self.is_custom else "Standard Library"
         self.name = f"Camellia-{self.key_size}-{self.mode}"
         self.description = f"{impl_type} {self.name}"
@@ -45,26 +28,12 @@ class CamelliaImplementation:
         logger.info(f"Initialized {self.description}")
     
     def generate_key(self):
-        """
-        Generate a random key.
-        
-        Returns:
-            bytes: Generated key
-        """
+
         self.encryption_key = generate_key(self.key_size)
         return self.encryption_key
     
     def encrypt(self, data, key=None):
-        """
-        Encrypt data.
-        
-        Args:
-            data: Data to encrypt
-            key: Key to use (or None to use instance key)
-            
-        Returns:
-            bytes: Encrypted data
-        """
+
         if key is None:
             key = self.encryption_key
         
@@ -79,16 +48,7 @@ class CamelliaImplementation:
             return self._encrypt_stdlib(data, key)
     
     def decrypt(self, data, key=None):
-        """
-        Decrypt data.
-        
-        Args:
-            data: Data to decrypt
-            key: Key to use (or None to use instance key)
-            
-        Returns:
-            bytes: Decrypted data
-        """
+
         if key is None:
             key = self.encryption_key
         
@@ -103,7 +63,6 @@ class CamelliaImplementation:
             return self._decrypt_stdlib(data, key)
     
     def _encrypt_custom(self, data, key):
-        """Encrypt using custom implementation."""
         try:
             cipher = CamelliaModes(key)
             
@@ -123,7 +82,6 @@ class CamelliaImplementation:
             raise
     
     def _decrypt_custom(self, data, key):
-        """Decrypt using custom implementation."""
         try:
             cipher = CamelliaModes(key)
             
@@ -143,44 +101,40 @@ class CamelliaImplementation:
             raise
     
     def _encrypt_stdlib(self, data, key):
-        """Encrypt using standard library."""
         try:
-            # Try cryptography library first
+            # cryptography library first
             return self._encrypt_cryptography(data, key)
         except ImportError:
             try:
-                # Fallback to PyCryptodome
+                # PyCryptodome
                 return self._encrypt_pycryptodome(data, key)
             except ImportError:
                 logger.warning("No standard library available, falling back to custom implementation")
                 return self._encrypt_custom(data, key)
     
     def _decrypt_stdlib(self, data, key):
-        """Decrypt using standard library."""
         try:
-            # Try cryptography library first
+            # cryptography library first
             return self._decrypt_cryptography(data, key)
         except ImportError:
             try:
-                # Fallback to PyCryptodome
+                # PyCryptodome
                 return self._decrypt_pycryptodome(data, key)
             except ImportError:
                 logger.warning("No standard library available, falling back to custom implementation")
                 return self._decrypt_custom(data, key)
     
     def _encrypt_cryptography(self, data, key):
-        """Encrypt using cryptography library."""
+
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import padding
         
-        # Generate IV for modes that need it
         if self.mode in ["CBC", "CFB", "OFB"]:
             iv = os.urandom(16)
         else:
             iv = None
         
-        # Create cipher
         if self.mode == "ECB":
             mode_obj = modes.ECB()
         elif self.mode == "CBC":
@@ -193,7 +147,7 @@ class CamelliaImplementation:
         cipher = Cipher(algorithms.Camellia(key), mode_obj, backend=default_backend())
         encryptor = cipher.encryptor()
         
-        # Handle padding for block modes
+        # padding for block modes
         if self.mode in ["ECB", "CBC"]:
             padder = padding.PKCS7(128).padder()
             padded_data = padder.update(data) + padder.finalize()
@@ -201,19 +155,19 @@ class CamelliaImplementation:
         else:
             ciphertext = encryptor.update(data) + encryptor.finalize()
         
-        # Return IV + ciphertext for modes that use IV
+        # return IV 
         if iv is not None:
             return iv + ciphertext
         else:
             return ciphertext
     
     def _decrypt_cryptography(self, data, key):
-        """Decrypt using cryptography library."""
+
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import padding
         
-        # Extract IV for modes that need it
+        # extract IV 
         if self.mode in ["CBC", "CFB", "OFB"]:
             if len(data) < 16:
                 raise ValueError("Data too short to contain IV")
@@ -223,7 +177,7 @@ class CamelliaImplementation:
             iv = None
             ciphertext = data
         
-        # Create cipher
+        # create cipher
         if self.mode == "ECB":
             mode_obj = modes.ECB()
         elif self.mode == "CBC":
@@ -238,7 +192,7 @@ class CamelliaImplementation:
         
         plaintext = decryptor.update(ciphertext) + decryptor.finalize()
         
-        # Handle padding for block modes
+        # handle padding 
         if self.mode in ["ECB", "CBC"]:
             unpadder = padding.PKCS7(128).unpadder()
             plaintext = unpadder.update(plaintext) + unpadder.finalize()
@@ -246,17 +200,16 @@ class CamelliaImplementation:
         return plaintext
     
     def _encrypt_pycryptodome(self, data, key):
-        """Encrypt using PyCryptodome library."""
         from Crypto.Cipher import Camellia
         from Crypto.Util.Padding import pad
         
-        # Generate IV for modes that need it
+        # generate IV 
         if self.mode in ["CBC", "CFB", "OFB"]:
             iv = os.urandom(16)
         else:
             iv = None
         
-        # Create cipher
+        # create cipher
         if self.mode == "ECB":
             cipher = Camellia.new(key, Camellia.MODE_ECB)
         elif self.mode == "CBC":
@@ -266,25 +219,24 @@ class CamelliaImplementation:
         elif self.mode == "OFB":
             cipher = Camellia.new(key, Camellia.MODE_OFB, iv)
         
-        # Handle padding for block modes
+        # handle padding for block modes
         if self.mode in ["ECB", "CBC"]:
             padded_data = pad(data, 16)
             ciphertext = cipher.encrypt(padded_data)
         else:
             ciphertext = cipher.encrypt(data)
         
-        # Return IV + ciphertext for modes that use IV
+        # return IV
         if iv is not None:
             return iv + ciphertext
         else:
             return ciphertext
     
     def _decrypt_pycryptodome(self, data, key):
-        """Decrypt using PyCryptodome library."""
         from Crypto.Cipher import Camellia
         from Crypto.Util.Padding import unpad
         
-        # Extract IV for modes that need it
+        # extract IV 
         if self.mode in ["CBC", "CFB", "OFB"]:
             if len(data) < 16:
                 raise ValueError("Data too short to contain IV")
@@ -294,7 +246,7 @@ class CamelliaImplementation:
             iv = None
             ciphertext = data
         
-        # Create cipher
+        # create cipher
         if self.mode == "ECB":
             cipher = Camellia.new(key, Camellia.MODE_ECB)
         elif self.mode == "CBC":
@@ -306,27 +258,14 @@ class CamelliaImplementation:
         
         plaintext = cipher.decrypt(ciphertext)
         
-        # Handle padding for block modes
+        # handle padding
         if self.mode in ["ECB", "CBC"]:
             plaintext = unpad(plaintext, 16)
         
         return plaintext
     
     def encrypt_stream(self, data, key=None, chunk_size=8192):
-        """
-        Encrypt data in streaming mode (chunk by chunk) - Option 1 approach.
-        
-        Encrypts all chunks sequentially and concatenates them with chunk boundary markers.
-        This allows for memory-efficient processing of large datasets.
-        
-        Args:
-            data: Data to encrypt (bytes)
-            key: Key to use (or None to use instance key)
-            chunk_size: Size of chunks to process (64KB, 256KB, 1MB, 4MB, 16MB)
-            
-        Returns:
-            bytes: Concatenated encrypted chunks with boundary markers
-        """
+
         if key is None:
             key = self.encryption_key
         
@@ -341,20 +280,7 @@ class CamelliaImplementation:
             return self._encrypt_stream_stdlib_v2(data, key, chunk_size)
     
     def decrypt_stream(self, data, key=None, chunk_size=8192):
-        """
-        Decrypt data in streaming mode (chunk by chunk) - Option 1 approach.
-        
-        Decrypts concatenated encrypted chunks by reading boundary markers
-        and processing each chunk sequentially.
-        
-        Args:
-            data: Concatenated encrypted data with boundary markers
-            key: Key to use (or None to use instance key)
-            chunk_size: Size of chunks used during encryption
-            
-        Returns:
-            bytes: Decrypted data (concatenated chunks)
-        """
+
         if key is None:
             key = self.encryption_key
         
@@ -369,20 +295,16 @@ class CamelliaImplementation:
             return self._decrypt_stream_stdlib_v2(data, key, chunk_size)
     
     def _encrypt_stream_custom_v2(self, data, key, chunk_size):
-        """
-        Encrypt using custom implementation in streaming mode (Option 1).
-        
-        Format: [chunk_size:4][encrypted_chunk][chunk_size:4][encrypted_chunk]...
-        """
+
         try:
             cipher = CamelliaModes(key)
             result = b""
             
-            # Process data in chunks
+            # process data in chunks
             for i in range(0, len(data), chunk_size):
                 chunk = data[i:i + chunk_size]
                 
-                # Encrypt the chunk
+                # encrypt the chunk
                 if self.mode == "ECB":
                     encrypted_chunk = cipher.encrypt_ecb(chunk)
                 elif self.mode == "CBC":
@@ -394,7 +316,7 @@ class CamelliaImplementation:
                 else:
                     raise ValueError(f"Unsupported mode: {self.mode}")
                 
-                # Add chunk boundary marker: [encrypted_chunk_size:4][encrypted_chunk]
+                # add chunk boundary marker: [encrypted_chunk_size:4][encrypted_chunk]
                 chunk_header = len(encrypted_chunk).to_bytes(4, byteorder='big')
                 result += chunk_header + encrypted_chunk
             
@@ -405,17 +327,13 @@ class CamelliaImplementation:
             raise
     
     def _decrypt_stream_custom_v2(self, data, key, chunk_size):
-        """
-        Decrypt using custom implementation in streaming mode (Option 1).
-        
-        Reads chunk boundary markers and decrypts each chunk sequentially.
-        """
+
         try:
             cipher = CamelliaModes(key)
             result = b""
             offset = 0
             
-            # Process concatenated encrypted chunks
+            # process concatenated encrypted chunks
             while offset < len(data):
                 # Read chunk size (4 bytes)
                 if offset + 4 > len(data):
@@ -424,14 +342,14 @@ class CamelliaImplementation:
                 encrypted_chunk_size = int.from_bytes(data[offset:offset+4], byteorder='big')
                 offset += 4
                 
-                # Read encrypted chunk
+                # read encrypted chunk
                 if offset + encrypted_chunk_size > len(data):
                     break
                 
                 encrypted_chunk = data[offset:offset+encrypted_chunk_size]
                 offset += encrypted_chunk_size
                 
-                # Decrypt the chunk
+                # decrypt chunk
                 if self.mode == "ECB":
                     decrypted_chunk = cipher.decrypt_ecb(encrypted_chunk)
                 elif self.mode == "CBC":
@@ -452,56 +370,50 @@ class CamelliaImplementation:
             raise
     
     def _encrypt_stream_stdlib_v2(self, data, key, chunk_size):
-        """
-        Encrypt using standard library in streaming mode (Option 1).
-        """
+
         try:
-            # Try cryptography library first
+            # cryptography library first
             return self._encrypt_stream_cryptography_v2(data, key, chunk_size)
         except ImportError:
             try:
-                # Fallback to PyCryptodome
+                # PyCryptodome
                 return self._encrypt_stream_pycryptodome_v2(data, key, chunk_size)
             except ImportError:
                 logger.warning("No standard library available, falling back to custom implementation")
                 return self._encrypt_stream_custom_v2(data, key, chunk_size)
     
     def _decrypt_stream_stdlib_v2(self, data, key, chunk_size):
-        """
-        Decrypt using standard library in streaming mode (Option 1).
-        """
+
         try:
-            # Try cryptography library first
+            # use cryptography library first
             return self._decrypt_stream_cryptography_v2(data, key, chunk_size)
         except ImportError:
             try:
-                # Fallback to PyCryptodome
+                # PyCryptodome
                 return self._decrypt_stream_pycryptodome_v2(data, key, chunk_size)
             except ImportError:
                 logger.warning("No standard library available, falling back to custom implementation")
                 return self._decrypt_stream_custom_v2(data, key, chunk_size)
     
     def _encrypt_stream_cryptography_v2(self, data, key, chunk_size):
-        """
-        Encrypt using cryptography library in streaming mode (Option 1).
-        """
+
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import padding
         
         result = b""
         
-        # Process data in chunks
+        # process data in chunks
         for i in range(0, len(data), chunk_size):
             chunk = data[i:i + chunk_size]
             
-            # Generate IV for modes that need it
+            # generate IV 
             if self.mode in ["CBC", "CFB", "OFB"]:
                 iv = os.urandom(16)
             else:
                 iv = None
             
-            # Create cipher for this chunk
+            # create cipher for this chunk
             if self.mode == "ECB":
                 mode_obj = modes.ECB()
             elif self.mode == "CBC":
@@ -514,7 +426,7 @@ class CamelliaImplementation:
             cipher = Cipher(algorithms.Camellia(key), mode_obj, backend=default_backend())
             encryptor = cipher.encryptor()
             
-            # Handle padding for block modes
+            # handle padding 
             if self.mode in ["ECB", "CBC"]:
                 padder = padding.PKCS7(128).padder()
                 padded_chunk = padder.update(chunk) + padder.finalize()
@@ -522,20 +434,18 @@ class CamelliaImplementation:
             else:
                 encrypted_chunk = encryptor.update(chunk) + encryptor.finalize()
             
-            # Prepend IV if needed
+            # prepend IV if needed
             if iv is not None:
                 encrypted_chunk = iv + encrypted_chunk
             
-            # Add chunk boundary marker
+            # add chunk boundary marker
             chunk_header = len(encrypted_chunk).to_bytes(4, byteorder='big')
             result += chunk_header + encrypted_chunk
         
         return result
     
     def _decrypt_stream_cryptography_v2(self, data, key, chunk_size):
-        """
-        Decrypt using cryptography library in streaming mode (Option 1).
-        """
+
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import padding
@@ -543,23 +453,23 @@ class CamelliaImplementation:
         result = b""
         offset = 0
         
-        # Process concatenated encrypted chunks
+        # process concatenated chunks
         while offset < len(data):
-            # Read chunk size (4 bytes)
+            # read chunk size (4 bytes)
             if offset + 4 > len(data):
                 break
             
             encrypted_chunk_size = int.from_bytes(data[offset:offset+4], byteorder='big')
             offset += 4
             
-            # Read encrypted chunk
+            # read encrypted chunk
             if offset + encrypted_chunk_size > len(data):
                 break
             
             encrypted_chunk = data[offset:offset+encrypted_chunk_size]
             offset += encrypted_chunk_size
             
-            # Extract IV for modes that need it
+            # extract IV 
             if self.mode in ["CBC", "CFB", "OFB"]:
                 if len(encrypted_chunk) < 16:
                     raise ValueError("Encrypted chunk too short to contain IV")
@@ -569,7 +479,7 @@ class CamelliaImplementation:
                 iv = None
                 ciphertext = encrypted_chunk
             
-            # Create cipher for this chunk
+            # xreate cipher for chunk
             if self.mode == "ECB":
                 mode_obj = modes.ECB()
             elif self.mode == "CBC":
@@ -584,7 +494,7 @@ class CamelliaImplementation:
             
             decrypted_chunk = decryptor.update(ciphertext) + decryptor.finalize()
             
-            # Handle padding for block modes
+            # handle padding
             if self.mode in ["ECB", "CBC"]:
                 unpadder = padding.PKCS7(128).unpadder()
                 decrypted_chunk = unpadder.update(decrypted_chunk) + unpadder.finalize()
@@ -594,25 +504,23 @@ class CamelliaImplementation:
         return result
     
     def _encrypt_stream_pycryptodome_v2(self, data, key, chunk_size):
-        """
-        Encrypt using PyCryptodome library in streaming mode (Option 1).
-        """
+
         from Crypto.Cipher import Camellia
         from Crypto.Util.Padding import pad
         
         result = b""
         
-        # Process data in chunks
+        # process data in chunks
         for i in range(0, len(data), chunk_size):
             chunk = data[i:i + chunk_size]
             
-            # Generate IV for modes that need it
+            # generate IV 
             if self.mode in ["CBC", "CFB", "OFB"]:
                 iv = os.urandom(16)
             else:
                 iv = None
             
-            # Create cipher for this chunk
+            # create cipher
             if self.mode == "ECB":
                 cipher = Camellia.new(key, Camellia.MODE_ECB)
             elif self.mode == "CBC":
@@ -622,50 +530,48 @@ class CamelliaImplementation:
             elif self.mode == "OFB":
                 cipher = Camellia.new(key, Camellia.MODE_OFB, iv)
             
-            # Handle padding for block modes
+            # handle padding 
             if self.mode in ["ECB", "CBC"]:
                 padded_chunk = pad(chunk, 16)
                 encrypted_chunk = cipher.encrypt(padded_chunk)
             else:
                 encrypted_chunk = cipher.encrypt(chunk)
             
-            # Prepend IV if needed
+            # prepend IV 
             if iv is not None:
                 encrypted_chunk = iv + encrypted_chunk
             
-            # Add chunk boundary marker
+            # add chunk markers
             chunk_header = len(encrypted_chunk).to_bytes(4, byteorder='big')
             result += chunk_header + encrypted_chunk
         
         return result
     
     def _decrypt_stream_pycryptodome_v2(self, data, key, chunk_size):
-        """
-        Decrypt using PyCryptodome library in streaming mode (Option 1).
-        """
+
         from Crypto.Cipher import Camellia
         from Crypto.Util.Padding import unpad
         
         result = b""
         offset = 0
         
-        # Process concatenated encrypted chunks
+        # process concatenated encrypted chunks
         while offset < len(data):
-            # Read chunk size (4 bytes)
+            # read chunk size
             if offset + 4 > len(data):
                 break
             
             encrypted_chunk_size = int.from_bytes(data[offset:offset+4], byteorder='big')
             offset += 4
             
-            # Read encrypted chunk
+            # read encrypted chunk
             if offset + encrypted_chunk_size > len(data):
                 break
             
             encrypted_chunk = data[offset:offset+encrypted_chunk_size]
             offset += encrypted_chunk_size
             
-            # Extract IV for modes that need it
+            # extract IV 
             if self.mode in ["CBC", "CFB", "OFB"]:
                 if len(encrypted_chunk) < 16:
                     raise ValueError("Encrypted chunk too short to contain IV")
@@ -675,7 +581,7 @@ class CamelliaImplementation:
                 iv = None
                 ciphertext = encrypted_chunk
             
-            # Create cipher for this chunk
+            # xreate cipher for chunk
             if self.mode == "ECB":
                 cipher = Camellia.new(key, Camellia.MODE_ECB)
             elif self.mode == "CBC":
@@ -687,7 +593,7 @@ class CamelliaImplementation:
             
             decrypted_chunk = cipher.decrypt(ciphertext)
             
-            # Handle padding for block modes
+            # handle padding 
             if self.mode in ["ECB", "CBC"]:
                 decrypted_chunk = unpad(decrypted_chunk, 16)
             
