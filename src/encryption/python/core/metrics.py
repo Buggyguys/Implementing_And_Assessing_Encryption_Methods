@@ -1,31 +1,23 @@
-#!/usr/bin/env python3
-"""
-CryptoBench Pro - Metrics Collection Module
-Provides classes and functions for collecting performance metrics.
-"""
-
 import time
 import logging
 import psutil
 import os
 
-# Setup logging
+# setup logging
 logger = logging.getLogger("PythonCore")
 
 class BenchmarkMetrics:
-    """Collects and stores benchmark metrics for encryption operations."""
-    
     def __init__(self, process=None):
-        """Initialize with optional psutil process object."""
+        # initialize with optional psutil process object
         self.process = process or psutil.Process()
-        # Check if IO counters are available (not available on all platforms)
+        # check if IO counters are available
         try:
             self.has_io_counters = hasattr(self.process, "io_counters") and self.process.io_counters() is not None
         except (psutil.AccessDenied, AttributeError, OSError):
             self.has_io_counters = False
             logger.warning("IO counters are not available - IO metrics will not be collected")
         
-        # Check if context switches are available
+        # check if context switches are available
         try:
             self.has_ctx_switches = hasattr(self.process, "num_ctx_switches") and self.process.num_ctx_switches() is not None
         except (psutil.AccessDenied, AttributeError, OSError):
@@ -35,8 +27,7 @@ class BenchmarkMetrics:
         self.reset()
     
     def reset(self):
-        """Reset all metrics."""
-        # Key Generation metrics (matching C format)
+        # reset all metrics
         self.keygen_time_ns = 0
         self.keygen_cpu_time_ns = 0
         self.keygen_cpu_percent = 100
@@ -46,7 +37,7 @@ class BenchmarkMetrics:
         self.keygen_ctx_switches_voluntary = 0
         self.keygen_ctx_switches_involuntary = 0
         
-        # Encryption metrics (matching C format)
+        # encryption metrics 
         self.encrypt_time_ns = 0
         self.encrypt_cpu_time_ns = 0
         self.encrypt_cpu_percent = 100
@@ -58,7 +49,7 @@ class BenchmarkMetrics:
         self.input_size_bytes = 0
         self.ciphertext_size_bytes = 0
         
-        # Decryption metrics (matching C format)
+        # decryption metrics    
         self.decrypt_time_ns = 0
         self.decrypt_cpu_time_ns = 0
         self.decrypt_cpu_percent = 100
@@ -69,21 +60,21 @@ class BenchmarkMetrics:
         self.decrypt_ctx_switches_involuntary = 0
         self.decrypted_size_bytes = 0
         
-        # Additional metrics to match C format
+        # additional metrics 
         self.correctness_passed = True
         self.key_size_bytes = 0
         self.key_size_bits = 0
         self.thread_count = 1
         self.process_priority = 0
         
-        # Algorithm-specific metrics
+        # algorithm-specific metrics
         self.block_size_bytes = None
         self.iv_size_bytes = None
         self.num_rounds = None
         self.is_custom_implementation = False
         self.library_version = "PyCryptodome"
         
-        # Ensure has_ctx_switches is defined (in case it's not set in __init__)
+        # ensure has_ctx_switches is defined (in case it's not set in __init__)
         if not hasattr(self, 'has_ctx_switches'):
             try:
                 self.has_ctx_switches = hasattr(self.process, "num_ctx_switches") and self.process.num_ctx_switches() is not None
@@ -92,24 +83,24 @@ class BenchmarkMetrics:
                 logger.warning("Context switch counters are not available - context switch metrics will not be collected")
     
     def set_algorithm_metadata(self, implementation, key_size_bytes):
-        """Set algorithm-specific metadata based on the implementation."""
+        # set algorithm-specific metadata based on the implementation
         self.key_size_bytes = key_size_bytes
         self.key_size_bits = key_size_bytes * 8
         
-        # Set custom implementation flag
+        # set custom implementation flag
         self.is_custom_implementation = getattr(implementation, 'is_custom', False)
         self.library_version = "custom" if self.is_custom_implementation else "PyCryptodome"
         
-        # Get algorithm name from implementation
+        # get algorithm name from implementation
         algo_name = getattr(implementation, 'name', '').lower()
         
-        # Set algorithm-specific metadata
+        # set algorithm-specific metadata
         if 'aes' in algo_name or 'camellia' in algo_name:
-            # Block ciphers
+            # block ciphers
             self.block_size_bytes = 16  # 128 bits for AES/Camellia
-            self.iv_size_bytes = 16     # Standard IV size
+            self.iv_size_bytes = 16     # standard IV size
             
-            # Number of rounds based on key size and algorithm
+            # number of rounds based on key size and algorithm
             if 'aes' in algo_name:
                 if key_size_bytes == 16:    # AES-128
                     self.num_rounds = 10
@@ -123,25 +114,24 @@ class BenchmarkMetrics:
                 else:                       # Camellia-192/256
                     self.num_rounds = 24
         elif 'chacha' in algo_name:
-            # ChaCha20 specific
+            # chacha20 specific
             self.num_rounds = 20
-            # No block size or IV size for stream ciphers in this context
+            # no block size or IV size for stream ciphers in this context
         
-        # Get thread count and process priority
+        # get thread count and process priority
         try:
             self.thread_count = self.process.num_threads()
         except (psutil.AccessDenied, AttributeError, OSError):
             self.thread_count = 1
         
         try:
-            # Get process priority (nice value on Unix systems)
+            # get process priority (nice value on Unix systems)
             self.process_priority = self.process.nice()
         except (psutil.AccessDenied, AttributeError, OSError):
             self.process_priority = 0
     
     def measure_keygen(self, key_gen_func, *args, **kwargs):
-        """Measure key generation performance."""
-        # Get initial metrics
+        # get initial metrics
         try:
             initial_io = self.process.io_counters() if self.has_io_counters else None
         except (psutil.AccessDenied, AttributeError, OSError):
@@ -165,15 +155,15 @@ class BenchmarkMetrics:
         except (psutil.AccessDenied, AttributeError, OSError):
             initial_memory = None
         
-        # Measure wall time with nanosecond precision
+        # measure wall time with nanosecond precision
         start_time = time.perf_counter_ns()
         key = key_gen_func(*args, **kwargs)
         end_time = time.perf_counter_ns()
         
-        # Calculate metrics
+        # calculate metrics
         self.keygen_time_ns = end_time - start_time
         
-        # Get final metrics
+        # get final metrics
         try:
             final_cpu_times = self.process.cpu_times() if initial_cpu_times is not None else None
         except (psutil.AccessDenied, AttributeError, OSError):
@@ -189,26 +179,26 @@ class BenchmarkMetrics:
         except (psutil.AccessDenied, AttributeError, OSError):
             final_memory = None
         
-        # Update CPU time metrics if available
+        # update CPU time metrics if available
         if initial_cpu_times is not None and final_cpu_times is not None:
             cpu_user_diff = final_cpu_times.user - initial_cpu_times.user
             cpu_system_diff = final_cpu_times.system - initial_cpu_times.system
             total_cpu_time = cpu_user_diff + cpu_system_diff
             
-            # Convert to nanoseconds
+            # convert to nanoseconds
             self.keygen_cpu_time_ns = int(total_cpu_time * 1_000_000_000)
             
-            # Calculate CPU percentage
+            # calculate CPU percentage
             wall_time_s = self.keygen_time_ns / 1_000_000_000
             if wall_time_s > 0:
                 self.keygen_cpu_percent = (total_cpu_time / wall_time_s) * 100
         
-        # Update context switch metrics if available
+        # update context switch metrics if available
         if initial_ctx is not None and final_ctx is not None:
             self.keygen_ctx_switches_voluntary = max(0, final_ctx.voluntary - initial_ctx.voluntary)
             self.keygen_ctx_switches_involuntary = max(0, final_ctx.involuntary - initial_ctx.involuntary)
         
-        # Record peak memory usage
+        # record peak memory usage
         if final_memory is not None:
             self.keygen_peak_memory_bytes = final_memory.rss
             if initial_memory is not None:
@@ -217,11 +207,10 @@ class BenchmarkMetrics:
         return key
     
     def measure_encrypt(self, encrypt_func, plaintext, key, *args, **kwargs):
-        """Measure encryption performance."""
-        # Store input size
+        # store input size
         self.input_size_bytes = len(plaintext) if hasattr(plaintext, '__len__') else 0
         
-        # Get initial metrics
+        # get initial metrics
         try:
             initial_ctx = self.process.num_ctx_switches() if hasattr(self, "has_ctx_switches") and self.has_ctx_switches else None
         except (psutil.AccessDenied, AttributeError, OSError):
@@ -239,15 +228,15 @@ class BenchmarkMetrics:
         except (psutil.AccessDenied, AttributeError, OSError):
             initial_memory = None
         
-        # Measure wall time with nanosecond precision
+        # measure wall time with nanosecond precision
         start_time = time.perf_counter_ns()
         ciphertext = encrypt_func(plaintext, key, *args, **kwargs)
         end_time = time.perf_counter_ns()
         
-        # Calculate metrics
+        # calculate metrics
         self.encrypt_time_ns = end_time - start_time
         
-        # Get final metrics
+        # get final metrics
         try:
             final_cpu_times = self.process.cpu_times() if initial_cpu_times is not None else None
         except (psutil.AccessDenied, AttributeError, OSError):
@@ -263,32 +252,32 @@ class BenchmarkMetrics:
         except (psutil.AccessDenied, AttributeError, OSError):
             final_memory = None
         
-        # Update CPU time metrics if available
+        # update CPU time metrics if available
         if initial_cpu_times is not None and final_cpu_times is not None:
             cpu_user_diff = final_cpu_times.user - initial_cpu_times.user
             cpu_system_diff = final_cpu_times.system - initial_cpu_times.system
             total_cpu_time = cpu_user_diff + cpu_system_diff
             
-            # Convert to nanoseconds
+            # convert to nanoseconds
             self.encrypt_cpu_time_ns = int(total_cpu_time * 1_000_000_000)
             
-            # Calculate CPU percentage
+            # calculate CPU percentage
             wall_time_s = self.encrypt_time_ns / 1_000_000_000
             if wall_time_s > 0:
                 self.encrypt_cpu_percent = (total_cpu_time / wall_time_s) * 100
         
-        # Update context switch metrics if available
+        # update context switch metrics if available
         if initial_ctx is not None and final_ctx is not None:
             self.encrypt_ctx_switches_voluntary = max(0, final_ctx.voluntary - initial_ctx.voluntary)
             self.encrypt_ctx_switches_involuntary = max(0, final_ctx.involuntary - initial_ctx.involuntary)
         
-        # Record peak memory usage and ciphertext size
+        # record peak memory usage and ciphertext size
         if final_memory is not None:
             self.encrypt_peak_memory_bytes = final_memory.rss
             if initial_memory is not None:
                 self.encrypt_allocated_memory_bytes = max(0, final_memory.rss - initial_memory.rss)
         
-        # Get ciphertext size safely
+        # get ciphertext size safely
         try:
             self.ciphertext_size_bytes = len(ciphertext) if hasattr(ciphertext, '__len__') else 0
         except (TypeError, AttributeError):
@@ -298,8 +287,7 @@ class BenchmarkMetrics:
         return ciphertext
     
     def measure_decrypt(self, decrypt_func, ciphertext, key, original_plaintext, *args, **kwargs):
-        """Measure decryption performance and verify correctness."""
-        # Get initial metrics
+        # get initial metrics
         try:
             initial_ctx = self.process.num_ctx_switches() if hasattr(self, "has_ctx_switches") and self.has_ctx_switches else None
         except (psutil.AccessDenied, AttributeError, OSError):
@@ -317,15 +305,15 @@ class BenchmarkMetrics:
         except (psutil.AccessDenied, AttributeError, OSError):
             initial_memory = None
         
-        # Measure wall time with nanosecond precision
+        # measure wall time with nanosecond precision
         start_time = time.perf_counter_ns()
         decrypted_text = decrypt_func(ciphertext, key, *args, **kwargs)
         end_time = time.perf_counter_ns()
         
-        # Calculate metrics
+        # calculate metrics
         self.decrypt_time_ns = end_time - start_time
         
-        # Get final metrics
+        # get final metrics
         try:
             final_cpu_times = self.process.cpu_times() if initial_cpu_times is not None else None
         except (psutil.AccessDenied, AttributeError, OSError):
@@ -341,38 +329,38 @@ class BenchmarkMetrics:
         except (psutil.AccessDenied, AttributeError, OSError):
             final_memory = None
         
-        # Update CPU time metrics if available
+        # update CPU time metrics if available
         if initial_cpu_times is not None and final_cpu_times is not None:
             cpu_user_diff = final_cpu_times.user - initial_cpu_times.user
             cpu_system_diff = final_cpu_times.system - initial_cpu_times.system
             total_cpu_time = cpu_user_diff + cpu_system_diff
             
-            # Convert to nanoseconds
+            # convert to nanoseconds
             self.decrypt_cpu_time_ns = int(total_cpu_time * 1_000_000_000)
             
-            # Calculate CPU percentage
+            # calculate CPU percentage
             wall_time_s = self.decrypt_time_ns / 1_000_000_000
             if wall_time_s > 0:
                 self.decrypt_cpu_percent = (total_cpu_time / wall_time_s) * 100
         
-        # Update context switch metrics if available
+        # update context switch metrics if available
         if initial_ctx is not None and final_ctx is not None:
             self.decrypt_ctx_switches_voluntary = max(0, final_ctx.voluntary - initial_ctx.voluntary)
             self.decrypt_ctx_switches_involuntary = max(0, final_ctx.involuntary - initial_ctx.involuntary)
         
-        # Record peak memory usage
+        # record peak memory usage
         if final_memory is not None:
             self.decrypt_peak_memory_bytes = final_memory.rss
             if initial_memory is not None:
                 self.decrypt_allocated_memory_bytes = max(0, final_memory.rss - initial_memory.rss)
         
-        # Store decrypted size
+        # store decrypted size
         try:
             self.decrypted_size_bytes = len(decrypted_text) if hasattr(decrypted_text, '__len__') else 0
         except (TypeError, AttributeError):
             self.decrypted_size_bytes = 0
         
-        # Verify correctness
+        # verify correctness
         try:
             self.correctness_passed = (decrypted_text == original_plaintext)
         except Exception as e:
@@ -382,12 +370,11 @@ class BenchmarkMetrics:
         return decrypted_text
     
     def to_dict(self, iteration_number=1):
-        """Convert metrics to a dictionary in C format."""
         result = {
-            # Iteration info
+            # iteration info
             "iteration": iteration_number,
             
-            # Key Generation metrics
+            # key generation metrics
             "keygen_time_ns": self.keygen_time_ns,
             "keygen_cpu_time_ns": self.keygen_cpu_time_ns,
             "keygen_cpu_percent": self.keygen_cpu_percent,
@@ -401,7 +388,7 @@ class BenchmarkMetrics:
             "thread_count": self.thread_count,
             "process_priority": self.process_priority,
             
-            # Encryption metrics
+            # encryption metrics
             "encrypt_time_ns": self.encrypt_time_ns,
             "encrypt_cpu_time_ns": self.encrypt_cpu_time_ns,
             "encrypt_cpu_percent": self.encrypt_cpu_percent,
@@ -413,7 +400,7 @@ class BenchmarkMetrics:
             "input_size_bytes": self.input_size_bytes,
             "ciphertext_size_bytes": self.ciphertext_size_bytes,
             
-            # Decryption metrics
+            # decryption metrics
             "decrypt_time_ns": self.decrypt_time_ns,
             "decrypt_cpu_time_ns": self.decrypt_cpu_time_ns,
             "decrypt_cpu_percent": self.decrypt_cpu_percent,
@@ -425,12 +412,12 @@ class BenchmarkMetrics:
             "decrypted_size_bytes": self.decrypted_size_bytes,
             "correctness_passed": self.correctness_passed,
             
-            # Implementation details
+            # implementation details
             "is_custom_implementation": self.is_custom_implementation,
             "library_version": self.library_version
         }
         
-        # Add algorithm-specific fields if available
+        # add algorithm-specific fields if available
         if self.block_size_bytes is not None:
             result["block_size_bytes"] = self.block_size_bytes
         if self.iv_size_bytes is not None:

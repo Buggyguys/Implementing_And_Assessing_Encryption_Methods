@@ -1,68 +1,32 @@
-#!/usr/bin/env python3
-"""
-CryptoBench Pro - Measurement Module
-Provides functions for measuring encryption and decryption performance.
-"""
-
 import time
 import logging
 import psutil
 import gc
 
-# Setup logging
+# setup logging
 logger = logging.getLogger("PythonCore")
 
 def measure_encryption_metrics(metrics, process_func, implementation, data, key, original_plaintext=None):
-    """
-    Universal method to measure encryption metrics regardless of implementation approach.
-    Works for both regular memory processing and memory-mapped processing.
-    
-    Args:
-        metrics: BenchmarkMetrics instance to update
-        process_func: Function to measure (encrypt or decrypt)
-        implementation: The encryption implementation
-        data: Data to process (plaintext or ciphertext)
-        key: Encryption key (can be a single key or a key pair tuple for RSA)
-        original_plaintext: For decryption, the original plaintext for correctness checking
-        
-    Returns:
-        The processed data (ciphertext or plaintext)
-    """
-    # For encryption, use the built-in metrics measurement
+    # for encryption, use the built-in metrics measurement
     if process_func.__name__ == 'encrypt':
         return metrics.measure_encrypt(process_func, data, key)
     
-    # For decryption, use the built-in metrics measurement with correctness check
+    # for decryption, use the built-in metrics measurement with correctness check
     elif process_func.__name__ == 'decrypt':
         return metrics.measure_decrypt(process_func, data, key, original_plaintext or data)
     
-    # Fallback for other operations (shouldn't happen with current implementation)
+
     else:
         logger.warning(f"Unexpected function name: {process_func.__name__}")
         return process_func(data, key)
 
 def measure_chunked_encryption(metrics, process_func, implementation, chunks, key, chunk_size=1024*1024, original_chunks=None):
-    """
-    Measure encryption metrics when processing data in chunks (for stream mode).
-    
-    Args:
-        metrics: BenchmarkMetrics instance to update
-        process_func: Function to measure (encrypt or decrypt)
-        implementation: The encryption implementation
-        chunks: List of data chunks to process
-        key: Encryption key (can be a single key or a key pair tuple for RSA)
-        chunk_size: Size of each chunk in bytes
-        original_chunks: For decryption, the original plaintext chunks for correctness checking
-        
-    Returns:
-        List of processed chunks
-    """
     if process_func.__name__ == 'encrypt':
-        # For encryption, measure the overall encryption process
+        # for encryption, measure the overall encryption process
         results = []
         total_start_time = time.perf_counter_ns()
         
-        # Get initial system metrics
+        # get initial system metrics
         process = metrics.process
         initial_cpu_times = None
         initial_memory = None
@@ -73,7 +37,7 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
         except (psutil.AccessDenied, AttributeError, OSError):
             logger.warning("System metrics not available for chunked processing")
         
-        # Process all chunks
+        # process all chunks
         for i, chunk in enumerate(chunks):
             try:
                 chunk_result = process_func(chunk, key)
@@ -84,7 +48,7 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
         
         total_end_time = time.perf_counter_ns()
         
-        # Calculate final metrics
+        # calculate final metrics
         try:
             final_cpu_times = process.cpu_times() if initial_cpu_times else None
             final_memory = process.memory_info() if initial_memory else None
@@ -92,10 +56,10 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
             final_cpu_times = None
             final_memory = None
         
-        # Set timing metrics
+        # set timing metrics
         metrics.encrypt_time_ns = total_end_time - total_start_time
         
-        # Set CPU metrics if available
+        # set CPU metrics if available
         if initial_cpu_times and final_cpu_times:
             cpu_user_diff = final_cpu_times.user - initial_cpu_times.user
             cpu_system_diff = final_cpu_times.system - initial_cpu_times.system
@@ -108,23 +72,23 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
             metrics.encrypt_cpu_time_ns = 0
             metrics.encrypt_cpu_percent = 100  # Default assumption
         
-        # Set memory metrics if available
+        # set memory metrics if available
         if final_memory:
             metrics.encrypt_peak_memory_bytes = final_memory.rss
             if initial_memory:
                 metrics.encrypt_allocated_memory_bytes = max(0, final_memory.rss - initial_memory.rss)
         
-        # Set ciphertext size
+        # set ciphertext size
         metrics.ciphertext_size_bytes = sum(len(r) for r in results if r)
         
         return results
         
     elif process_func.__name__ == 'decrypt':
-        # For decryption, measure the overall decryption process
+        # for decryption, measure the overall decryption process
         results = []
         total_start_time = time.perf_counter_ns()
         
-        # Get initial system metrics  
+        # get initial system metrics  
         process = metrics.process
         initial_cpu_times = None
         initial_memory = None
@@ -135,7 +99,7 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
         except (psutil.AccessDenied, AttributeError, OSError):
             logger.warning("System metrics not available for chunked processing")
         
-        # Process all chunks
+        # process all chunks
         for i, chunk in enumerate(chunks):
             try:
                 chunk_result = process_func(chunk, key)
@@ -146,7 +110,7 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
         
         total_end_time = time.perf_counter_ns()
         
-        # Calculate final metrics
+        # calculate final metrics
         try:
             final_cpu_times = process.cpu_times() if initial_cpu_times else None
             final_memory = process.memory_info() if initial_memory else None
@@ -154,10 +118,10 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
             final_cpu_times = None
             final_memory = None
         
-        # Set timing metrics
+        # set timing metrics
         metrics.decrypt_time_ns = total_end_time - total_start_time
         
-        # Set CPU metrics if available
+        # set CPU metrics if available
         if initial_cpu_times and final_cpu_times:
             cpu_user_diff = final_cpu_times.user - initial_cpu_times.user
             cpu_system_diff = final_cpu_times.system - initial_cpu_times.system
@@ -170,13 +134,13 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
             metrics.decrypt_cpu_time_ns = 0
             metrics.decrypt_cpu_percent = 100  # Default assumption
         
-        # Set memory metrics if available
+        # set memory metrics if available
         if final_memory:
             metrics.decrypt_peak_memory_bytes = final_memory.rss
             if initial_memory:
                 metrics.decrypt_allocated_memory_bytes = max(0, final_memory.rss - initial_memory.rss)
         
-        # Verify correctness by comparing a few chunks
+        # verify correctness by comparing a few chunks
         if original_chunks:
             correctness_checks = min(5, len(original_chunks), len(results))
             for i in range(correctness_checks):
@@ -190,7 +154,7 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
         return results
     
     else:
-        # Fallback for unknown function types
+        # fallback for unknown function types
         logger.warning(f"Unknown function type for chunked encryption: {process_func.__name__}")
         results = []
         for chunk in chunks:
@@ -202,5 +166,5 @@ def measure_chunked_encryption(metrics, process_func, implementation, chunks, ke
                 results.append(b'')
         return results
 
-# More specialized measurement functions for different algorithms and modes
+# more specialized measurement functions for different algorithms and modes
 # could be added here in the future 

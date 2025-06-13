@@ -134,34 +134,6 @@ class MemoryMappedDataset:
         """
         return list(self.create_chunks(chunk_size))
 
-class RotatingKeySet:
-    """Class to manage a set of keys that rotate for each chunk of data."""
-    
-    def __init__(self, key_pairs):
-        """Initialize with a list of key pairs."""
-        self.key_pairs = key_pairs
-        self.current_index = 0
-        self.total_keys = len(key_pairs)
-        # Special attribute to identify this as a rotating key set
-        self.__rotating_keys__ = True
-    
-    def get_next_key(self):
-        """Get the next key in the rotation and advance the index."""
-        if not self.key_pairs:
-            raise ValueError("No keys available in the rotating key set")
-        
-        # Get the current key
-        key = self.key_pairs[self.current_index]
-        
-        # Advance to the next key for next time
-        self.current_index = (self.current_index + 1) % self.total_keys
-        
-        return key
-    
-    def reset(self):
-        """Reset the rotation to start from the first key again."""
-        self.current_index = 0
-
 def load_dataset(dataset_path, use_mmap=False):
     """
     Load dataset from file while minimizing memory footprint.

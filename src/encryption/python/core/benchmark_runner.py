@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-CryptoBench Pro - Benchmark Runner Module
-Provides the core functionality for running benchmarks.
-"""
-
 import os
 import gc
 import time
@@ -13,44 +7,34 @@ from datetime import datetime
 
 from .metrics import BenchmarkMetrics
 from .results import calculate_aggregated_metrics, save_results
-from .utils import MemoryMappedDataset, RotatingKeySet, load_dataset
+from .utils import MemoryMappedDataset, load_dataset
 from .measurement import measure_encryption_metrics, measure_chunked_encryption
 
-# Setup logging
 logger = logging.getLogger("PythonCore")
 
 def get_key_size_bytes(key, implementation):
-    """
-    Helper function to get key size in bytes for different key types.
-    
-    Args:
-        key: The key object (can be various types)
-        implementation: The implementation object to get context
-        
-    Returns:
-        int: Key size in bytes
-    """
     try:
-        # Handle tuple keys (RSA public/private key pairs)
+        # RSA
+        # handle tuple keys (public/private keys)
         if isinstance(key, tuple):
-            # RSA keys - get the key size from the public key
+            # get key size from the public key
             if hasattr(key[0], 'size_in_bytes'):
                 return key[0].size_in_bytes()
             elif hasattr(key[0], 'key_size'):
-                return key[0].key_size // 8  # Convert bits to bytes
-            elif hasattr(key[0], 'n'):  # RSA key with modulus
-                # Calculate key size from modulus bit length
+                return key[0].key_size // 8  # bits to bytes
+            elif hasattr(key[0], 'n'):  # key with modulus
+                # get key size from modulus bit length
                 return (key[0].n.bit_length() + 7) // 8
             else:
                 logger.warning(f"Unknown RSA key type: {type(key[0])}")
-                return 256  # Default to 2048 bits / 8 = 256 bytes
+                return 256  # default to 2048 bits / 8 = 256 bytes
         
-        # Handle ECC keys
+        # ECC keys
         elif hasattr(key, 'private_value') or hasattr(key, 'public_key'):  # ECC private key
             if hasattr(key, 'key_size'):
                 return key.key_size // 8
             elif hasattr(key, 'curve'):
-                # Determine key size from curve
+                # key size from curve
                 curve_name = getattr(key.curve, 'name', '').lower()
                 if 'p256' in curve_name or 'secp256r1' in curve_name:
                     return 32  # 256 bits / 8
@@ -60,24 +44,22 @@ def get_key_size_bytes(key, implementation):
                     return 66  # 521 bits / 8 (rounded up)
                 else:
                     logger.warning(f"Unknown ECC curve: {curve_name}")
-                    return 32  # Default to P-256
+                    return 32  # default to P-256
             else:
                 logger.warning(f"Unknown ECC key type: {type(key)}")
-                return 32  # Default to P-256
+                return 32  # default to P-256
         
-        # Handle RSA keys (single key object)
+        # RSA keys (single key object)
         elif hasattr(key, 'size_in_bytes'):
             return key.size_in_bytes()
         elif hasattr(key, 'key_size'):
-            return key.key_size // 8  # Convert bits to bytes
-        elif hasattr(key, 'n'):  # RSA key with modulus
+            return key.key_size // 8  # bits to bytes
+        elif hasattr(key, 'n'):  # key with modulus
             return (key.n.bit_length() + 7) // 8
         
-        # Handle bytes/string keys (AES, ChaCha20, etc.)
+        # bytes/string keys (AES, ChaCha20, Camellia)
         elif hasattr(key, '__len__'):
             return len(key)
-        
-        # Fallback - try to get from implementation name
         else:
             impl_name = getattr(implementation, 'name', '').lower()
             if 'aes256' in impl_name or 'chacha20' in impl_name:
@@ -98,36 +80,26 @@ def get_key_size_bytes(key, implementation):
                 return 32   # Default to P-256
             else:
                 logger.warning(f"Could not determine key size for implementation: {impl_name}")
-                return 32  # Default fallback
+                return 32  
                 
     except Exception as e:
         logger.error(f"Error determining key size: {e}")
-        return 32  # Safe fallback
+        return 32  
 
 def run_benchmarks(config, implementations):
-    """
-    Run all benchmarks based on the configuration.
-    
-    Args:
-        config: Configuration dictionary
-        implementations: Dictionary of registered implementations
-        
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    # Get session information
+    # get session information
     session_dir = config["session_info"]["session_dir"]
     session_id = config["session_info"]["session_id"]
     
     logger.info(f"Starting Python benchmarks for session {session_id}")
     
-    # Extract test parameters
+    # extract test parameters
     iterations = config["test_parameters"]["iterations"]
     
-    # Handle both old and new dataset configuration formats
+    # handle both old and new dataset configuration formats
     dataset_info = config["test_parameters"].get("dataset_info")
     if dataset_info:
-        # New format with separate symmetric/asymmetric datasets
+        # format with separate symmetric/asymmetric datasets
         symmetric_dataset_path = dataset_info.get("symmetric", {}).get("path")
         asymmetric_dataset_path = dataset_info.get("asymmetric", {}).get("path")
         logger.info(f"Using new dual dataset format:")
@@ -136,33 +108,32 @@ def run_benchmarks(config, implementations):
         if asymmetric_dataset_path:
             logger.info(f"  Asymmetric dataset: {asymmetric_dataset_path}")
     else:
-        # Old format with single dataset path (for backward compatibility)
+        # format with single dataset path 
         dataset_path = config["test_parameters"].get("dataset_path")
         symmetric_dataset_path = dataset_path
         asymmetric_dataset_path = dataset_path
         logger.info(f"Using legacy single dataset format: {dataset_path}")
     
-    # Configuration parameters
+    # configuration parameters
     use_stdlib = config["test_parameters"].get("use_stdlib", True)
     use_custom = config["test_parameters"].get("use_custom", True)
     
-    # For backward compatibility, handle old config format
+    # handle old config format
     if "use_stdlib" not in config["test_parameters"] and "use_custom" not in config["test_parameters"]:
-        # Old format used include_stdlibs
         include_stdlibs = config["test_parameters"].get("include_stdlibs", True)
         use_stdlib = include_stdlibs
-        use_custom = True  # Always enable custom in backward compatibility mode
+        use_custom = True  # always enable custom in backward compatibility mode
     
     processing_strategy = config["test_parameters"].get("processing_strategy", "Memory")
     
     logger.info(f"Standard library implementations: {'enabled' if use_stdlib else 'disabled'}")
     logger.info(f"Custom implementations: {'enabled' if use_custom else 'disabled'}")
     
-    # Parse chunk size
+    # parse chunk size
     chunk_size_text = config["test_parameters"].get("chunk_size", "1MB")
     chunk_size_mb = 1  # Default: 1MB
     
-    # Parse the chunk size from the text
+    # parse the chunk size from the text
     if chunk_size_text.endswith("KB"):
         chunk_size_kb = int(chunk_size_text.replace("KB", ""))
         chunk_size = chunk_size_kb * 1024
@@ -176,7 +147,7 @@ def run_benchmarks(config, implementations):
     if processing_strategy == "Stream":
         logger.info(f"Using chunk size: {chunk_size_text} ({chunk_size} bytes)")
     
-    # Enable memory monitoring
+    # enable memory monitoring
     try:
         import tracemalloc
         tracemalloc.start()
@@ -186,18 +157,18 @@ def run_benchmarks(config, implementations):
         memory_tracking = False
         logger.info("Memory tracking not available (tracemalloc not installed)")
     
-    # Set a flag to use memory mapping for really large files
-    use_mmap = False  # Disable memory mapping completely to use full in-memory loading
+    # set a flag to use memory mapping for really large files
+    use_mmap = False  # disable memory mapping completely
     
-    # Initialize variables to avoid UnboundLocalError
+    # initialize variables
     cached_symmetric_dataset = None
     cached_asymmetric_dataset = None
     memory_mapped_symmetric_dataset = None
     memory_mapped_asymmetric_dataset = None
     
-    # Load datasets based on processing strategy
+    # load datasets based on processing strategy
     if processing_strategy == "Memory":
-        # Memory mode: Load entire datasets
+        # memory mode -> load entire datasets
         if symmetric_dataset_path:
             cached_symmetric_dataset = load_dataset(symmetric_dataset_path)
             if cached_symmetric_dataset is None:
@@ -214,7 +185,7 @@ def run_benchmarks(config, implementations):
             asymmetric_size_bytes = len(cached_asymmetric_dataset)
             logger.info(f"Asymmetric dataset loaded successfully: {asymmetric_size_bytes / (1024*1024):.2f} MB")
     else:
-        # Stream mode: Use memory-mapped datasets
+        # stream mode -> use memory-mapped datasets
         if symmetric_dataset_path:
             memory_mapped_symmetric_dataset = MemoryMappedDataset(symmetric_dataset_path)
             symmetric_size_bytes = os.path.getsize(symmetric_dataset_path)
@@ -225,14 +196,14 @@ def run_benchmarks(config, implementations):
             asymmetric_size_bytes = os.path.getsize(asymmetric_dataset_path)
             logger.info(f"Memory-mapped asymmetric dataset initialized: {asymmetric_size_bytes / (1024*1024):.2f} MB")
     
-    # Get enabled encryption methods
+    # get enabled encryptions
     enabled_methods = []
     for method_name, settings in config["encryption_methods"].items():
         if settings.get("enabled", False):
             method_settings = settings.copy()
             
             if method_name == "aes":
-                # AES implementations
+                # AES implementations - supported modes: GCM, OFB, CFB, CBC
                 if use_stdlib:
                     std_settings = method_settings.copy()
                     std_settings["is_custom"] = False
@@ -254,52 +225,37 @@ def run_benchmarks(config, implementations):
                     custom_settings["is_custom"] = True
                     enabled_methods.append(("chacha20_custom", custom_settings))
             elif method_name == "camellia":
-                # Camellia implementations
+                # Camellia implementations - supported modes: CBC, OFB, CFB, ECB
                 key_size = method_settings.get("key_size", "256")
-                mode = method_settings.get("mode", "GCM").upper()
+                mode = method_settings.get("mode", "CBC").upper()
+                
+                # validate mode for Camellia
+                if mode not in ["CBC", "OFB", "CFB", "ECB"]:
+                    logger.warning(f"Unsupported Camellia mode '{mode}'. Supported modes: CBC, OFB, CFB, ECB. Defaulting to CBC.")
+                    mode = "CBC"
+                    method_settings["mode"] = mode
                 
                 if use_stdlib:
-                    # Special case: Skip Camellia-GCM for standard library mode
-                    if mode == "GCM":
-                        logger.warning(f"Skipping Camellia-GCM in standard library mode - GCM mode is not supported by standard libraries.")
-                        logger.info(f"Camellia-GCM limitation: PyCryptodome doesn't include Camellia cipher, and cryptography.io supports Camellia but not in GCM mode.")
-                        logger.info(f"To test both standard and custom Camellia implementations, use CBC, ECB, OFB, or CFB mode instead.")
-                        logger.info(f"Supported Camellia modes in standard libraries: CBC, ECB, OFB, CFB")
+                    std_settings = method_settings.copy()
+                    std_settings["is_custom"] = False
+            
+                    # use specialized implementation names for different key sizes and modes
+                    impl_name = f"camellia{key_size}_{mode.lower()}"
+                    if impl_name in implementations:
+                        enabled_methods.append((impl_name, std_settings))
                     else:
-                        std_settings = method_settings.copy()
-                        std_settings["is_custom"] = False
-                        
-                        # Use specialized implementation names for different key sizes and modes
-                        if mode in ["CBC", "CTR", "GCM", "ECB", "CFB", "OFB"]:
-                            impl_name = f"camellia{key_size}_{mode.lower()}"
-                            if impl_name in implementations:
-                                enabled_methods.append((impl_name, std_settings))
-                            else:
-                                # Fallback to generic Camellia implementation
-                                enabled_methods.append((method_name, std_settings))
-                        else:
-                            # Fallback for other modes
-                                enabled_methods.append((method_name, std_settings))
+                        enabled_methods.append((method_name, std_settings))
                 
                 if use_custom:
                     custom_settings = method_settings.copy()
                     custom_settings["is_custom"] = True
-                    
-                    # Use specialized custom implementation names for different key sizes and modes
-                    if mode in ["CBC", "CTR", "GCM", "ECB", "CFB", "OFB"]:
-                        custom_impl_name = f"camellia{key_size}_{mode.lower()}_custom"
-                        if custom_impl_name in implementations:
-                            enabled_methods.append((custom_impl_name, custom_settings))
-                        else:
-                            # Fallback to generic custom Camellia implementation
-                            enabled_methods.append(("camellia_custom", custom_settings))
+                    custom_impl_name = f"camellia{key_size}_{mode.lower()}_custom"
+                    if custom_impl_name in implementations:
+                        enabled_methods.append((custom_impl_name, custom_settings))
                     else:
-                        # Fallback for other modes
-                            enabled_methods.append(("camellia_custom", custom_settings))
+                        enabled_methods.append(("camellia_custom", custom_settings))
             elif method_name == "rsa":
                 # RSA implementations
-                reuse_keys = method_settings.get("reuse_keys", False)
-                key_sets = method_settings.get("key_sets", 1)
                 rsa_key_size = method_settings.get("key_size", "2048")
                 rsa_padding = method_settings.get("padding", "OAEP")
                 use_oaep = rsa_padding == "OAEP"
@@ -308,16 +264,12 @@ def run_benchmarks(config, implementations):
                     std_settings = method_settings.copy()
                     std_settings["is_custom"] = False
                     std_settings["use_oaep"] = use_oaep
-                    std_settings["reuse_keys"] = reuse_keys
-                    std_settings["key_sets"] = key_sets
                     enabled_methods.append((method_name, std_settings))
                 
                 if use_custom:
                     custom_settings = method_settings.copy()
                     custom_settings["is_custom"] = True
                     custom_settings["use_oaep"] = use_oaep
-                    custom_settings["reuse_keys"] = reuse_keys
-                    custom_settings["key_sets"] = key_sets
                     enabled_methods.append(("rsa_custom", custom_settings))
             elif method_name == "ecc":
                 # ECC implementations
@@ -326,44 +278,36 @@ def run_benchmarks(config, implementations):
                 if use_stdlib:
                     std_settings = method_settings.copy()
                     std_settings["is_custom"] = False
-                    
-                    # Use specialized implementation names for different curves
                     curve_safe_name = curve.lower().replace("-", "")
                     impl_name = f"ecc_{curve_safe_name}"
                     if impl_name in implementations:
                         enabled_methods.append((impl_name, std_settings))
                     else:
-                        # Fallback to generic ECC implementation
                         enabled_methods.append((method_name, std_settings))
                 
                 if use_custom:
-                    # Custom ECC implementation - use specialized implementations
                     custom_settings = {
                         "curve": curve if curve in ["P-256", "P-384", "P-521"] else "P-256",
                         "is_custom": True
                     }
-                    
-                    # Use specialized custom implementation names for different curves
                     curve_safe_name = curve.lower().replace("-", "")
                     custom_impl_name = f"ecc_{curve_safe_name}_custom"
                     if custom_impl_name in implementations:
                         enabled_methods.append((custom_impl_name, custom_settings))
                     else:
-                        # Fallback to generic custom ECC implementation
                         enabled_methods.append(("ecc_custom", custom_settings))
             else:
-                # Other methods
                 enabled_methods.append((method_name, method_settings))
     
     if not enabled_methods:
         logger.error("No encryption methods enabled in configuration. Aborting.")
         return False
     
-    # Debug: Print encryption implementations
+    # print encryption implementations
     logger.info(f"Available implementations: {list(implementations.keys())}")
     logger.info(f"Enabled methods for benchmarking: {[method for method, _ in enabled_methods]}")
     
-    # Initialize results dictionary
+    # initialize results dictionary
     results = {
         "timestamp": datetime.now().isoformat(),
         "session_id": session_id,
@@ -387,17 +331,17 @@ def run_benchmarks(config, implementations):
         "encryption_results": {}
     }
     
-    # Add chunk size to configuration if using stream processing
+    # add chunk size to configuration if using stream processing
     if processing_strategy == "Stream":
         results["test_configuration"]["chunk_size"] = chunk_size_text
     
-    # Run benchmarks for each enabled encryption method
+    # run benchmarks for each enabled encryption method
     for method_name, settings in enabled_methods:
-        # Get basic info about this method
+        # get basic info about this method
         impl_name = method_name
         is_custom = settings.get("is_custom", False)
         
-        # Create description for logging
+        # description for logging
         if is_custom:
             impl_description = f"Custom {method_name.upper()} Implementation"
         else:
@@ -405,68 +349,35 @@ def run_benchmarks(config, implementations):
             
         logger.info(f"Running benchmark for {impl_description}")
         
-        # Check if implementation exists
+        # check if implementation exists
         if method_name not in implementations:
             logger.warning(f"No implementation found for {method_name}. Skipping.")
             continue
         
-        # Run the benchmark for this method
+        # run the benchmark for this method
         try:
             implementation_factory = implementations[method_name]
             implementation = implementation_factory(**settings)
             
-            # For RSA with key reuse, pre-generate key sets
-            reuse_keys = settings.get("reuse_keys", False)
-            key_sets_count = settings.get("key_sets", 1)
-            rsa_rotating_keys = None
-            
-            # Pre-generate RSA keys if key reuse is enabled
-            if reuse_keys and ("rsa" in method_name.lower()) and key_sets_count > 0:
-                logger.info(f"Pre-generating {key_sets_count} RSA key sets for reuse")
-                key_pairs = []
-                
-                # Track key generation time separately
-                key_gen_metrics = BenchmarkMetrics()
-                for i in range(key_sets_count):
-                    key_pairs.append(key_gen_metrics.measure_keygen(implementation.generate_key))
-                
-                # Create a rotating key set with these key pairs
-                rsa_rotating_keys = RotatingKeySet(key_pairs)
-                logger.info(f"Created rotating key set with {key_sets_count} RSA key pairs")
-            
-            # Run iterations
+            # run iterations
             iteration_results = []
             for i in range(iterations):
                 logger.info(f"Running iteration {i+1}/{iterations} for {impl_description}")
                 
-                # Create metrics collector
+                # create metrics collector
                 metrics = BenchmarkMetrics()
                 
                 try:
-                    # Key generation or key selection
-                    if rsa_rotating_keys:
-                        # Use a key from the rotating key set
-                        logger.info(f"Using pre-generated RSA key from rotating key set")
-                        key = rsa_rotating_keys.get_next_key()
-                        # Add placeholder key generation time (we already measured it)
-                        metrics.keygen_time_ns = int(key_gen_metrics.keygen_time_ns / key_sets_count)
-                        metrics.keygen_cpu_time_ns = int(key_gen_metrics.keygen_cpu_time_ns / key_sets_count)
-                        metrics.keygen_cpu_percent = key_gen_metrics.keygen_cpu_percent
-                        metrics.keygen_peak_memory_bytes = key_gen_metrics.keygen_peak_memory_bytes
-                        # Set algorithm metadata
-                        key_size_bytes = get_key_size_bytes(key, implementation)
-                        metrics.set_algorithm_metadata(implementation, key_size_bytes)
-                    else:
-                        # Generate a new key for each iteration
-                        key = metrics.measure_keygen(implementation.generate_key)
-                        # Set algorithm metadata after key generation
-                        key_size_bytes = get_key_size_bytes(key, implementation)
-                        metrics.set_algorithm_metadata(implementation, key_size_bytes)
+                    # generate a new key for each iteration
+                    key = metrics.measure_keygen(implementation.generate_key)
+                    # set algorithm metadata after key generation
+                    key_size_bytes = get_key_size_bytes(key, implementation)
+                    metrics.set_algorithm_metadata(implementation, key_size_bytes)
                     
-                    # Determine if this is a symmetric or asymmetric algorithm
+                    # determine if this is a symmetric or asymmetric algorithm
                     is_asymmetric = any(keyword in method_name.lower() for keyword in ['rsa', 'ecc'])
                     
-                    # Select appropriate dataset based on algorithm type
+                    # select appropriate dataset based on algorithm type
                     if is_asymmetric:
                         current_dataset_path = asymmetric_dataset_path
                         current_cached_dataset = cached_asymmetric_dataset
@@ -480,23 +391,23 @@ def run_benchmarks(config, implementations):
                         current_dataset_size = symmetric_size_bytes if symmetric_dataset_path else 0
                         dataset_type = "symmetric"
                     
-                    # Check if we have the required dataset for this algorithm type
+                    # check if we have the required dataset for this algorithm type
                     if not current_dataset_path:
                         logger.warning(f"No {dataset_type} dataset available for {impl_description}. Skipping.")
                         continue
                     
                     logger.info(f"Using {dataset_type} dataset for {impl_description}: {current_dataset_path}")
                     
-                    # Load or map dataset based on processing strategy
+                    # load or map dataset based on processing strategy
                     if processing_strategy == "Stream" and not is_asymmetric:
-                        # Use stream mode for symmetric algorithms (asymmetric doesn't work well with chunking)
+                        # use stream mode for symmetric algorithms (asymmetric doesn't work well with chunking)
                         
-                        # Check if the implementation has explicit stream methods
+                        # check if the implementation has explicit stream methods
                         if hasattr(implementation, 'encrypt_stream') and hasattr(implementation, 'decrypt_stream'):
-                            # Use implementation's own stream methods with user-specified chunk size
+                            # use implementation's own stream methods with user-specified chunk size
                             logger.info(f"Using implementation's native stream mode with chunk size {chunk_size} bytes")
                             
-                            # Load the entire dataset for stream processing
+                            # load the entire dataset for stream processing
                             if current_cached_dataset is None:
                                 current_cached_dataset = load_dataset(current_dataset_path)
                                 if is_asymmetric:
@@ -504,8 +415,7 @@ def run_benchmarks(config, implementations):
                                 else:
                                     cached_symmetric_dataset = current_cached_dataset
                             
-                            # Use the implementation's stream methods
-                            # Create wrapper functions with proper names for measurement
+                            # use implementation's stream methods
                             def encrypt_stream_wrapper(data, key):
                                 return implementation.encrypt_stream(data, key, chunk_size)
                             encrypt_stream_wrapper.__name__ = 'encrypt'
@@ -528,10 +438,10 @@ def run_benchmarks(config, implementations):
                                 implementation, 
                                 ciphertext, 
                                 key,
-                                current_cached_dataset  # For correctness checking
+                                current_cached_dataset  # for correctness checking
                             )
                             
-                            # Verify correctness
+                            # verify correctness
                             if current_cached_dataset == plaintext:
                                 metrics.correctness_passed = True
                                 logger.info(f"Correctness check passed for {impl_description}")
@@ -539,17 +449,17 @@ def run_benchmarks(config, implementations):
                                 metrics.correctness_passed = False
                                 logger.error(f"Correctness check failed for {impl_description}")
                             
-                            # Set additional metrics
+                            # set additional metrics
                             metrics.input_size_bytes = len(current_cached_dataset)
                             metrics.decrypted_size_bytes = len(plaintext) if hasattr(plaintext, '__len__') else 0
                             
-                            # Clean up
+                            # clean up
                             del ciphertext
                             del plaintext
                             gc.collect()
                             
                         else:
-                            # Fallback to chunked processing using regular encrypt/decrypt methods
+                            # fallback to chunked processing using regular encrypt/decrypt methods
                             logger.info(f"Using chunked fallback mode (implementation lacks native stream methods)")
                             
                             if current_memory_mapped_dataset is None:
@@ -559,15 +469,15 @@ def run_benchmarks(config, implementations):
                                 else:
                                     memory_mapped_symmetric_dataset = current_memory_mapped_dataset
                                 
-                            # Use streaming processing with chunked approach (use user-specified chunk size)
+                            # use streaming processing with chunked approach (user-specified chunk size)
                             total_chunks = (current_dataset_size + chunk_size - 1) // chunk_size
                             
                             logger.info(f"Processing {total_chunks} chunks of {chunk_size} bytes each using fallback chunked mode")
                             
-                            # Collect all chunks first for proper measurement
+                            # collect all chunks first for proper measurement
                             all_chunks = list(current_memory_mapped_dataset.create_chunks(chunk_size))
                             
-                            # Use the proper measurement system for encryption
+                            # use the proper measurement system for encryption
                             encrypted_chunks = measure_chunked_encryption(
                                 metrics,
                                 implementation.encrypt,
@@ -577,7 +487,7 @@ def run_benchmarks(config, implementations):
                                 chunk_size
                             )
                             
-                            # Use the proper measurement system for decryption
+                            # use the proper measurement system for decryption
                             decrypted_chunks = measure_chunked_encryption(
                                 metrics,
                                 implementation.decrypt,
@@ -585,11 +495,11 @@ def run_benchmarks(config, implementations):
                                 encrypted_chunks,
                                 key,
                                 chunk_size,
-                                all_chunks  # Pass original chunks for correctness checking
+                                all_chunks  # pass original chunks for correctness checking
                             )
                             
-                            # Verify correctness by comparing chunks
-                            correctness_checks = min(5, len(all_chunks))  # Check up to 5 chunks
+                            # verify correctness by comparing chunks
+                            correctness_checks = min(5, len(all_chunks))  # check up to 5 chunks
                             for check_idx in range(correctness_checks):
                                 if all_chunks[check_idx] != decrypted_chunks[check_idx]:
                                     logger.error(f"Correctness check failed for chunk {check_idx}")
@@ -598,30 +508,30 @@ def run_benchmarks(config, implementations):
                             else:
                                 metrics.correctness_passed = True
                                 
-                            # Set additional metrics
+                            # set additional metrics
                             metrics.input_size_bytes = current_dataset_size
                             metrics.decrypted_size_bytes = sum(len(chunk) for chunk in decrypted_chunks)
                             
-                            # Clean up chunks to free memory
+                            # clean up chunks to free memory
                             del all_chunks
                             del encrypted_chunks
                             del decrypted_chunks
                             gc.collect()
                         
                     else:
-                        # Memory mode: Load entire dataset (or force memory mode for asymmetric algorithms)
+                        # load entire dataset (or force memory mode for asymmetric algorithms)
                         if processing_strategy == "Stream" and is_asymmetric:
                             logger.info(f"Using Memory mode for {dataset_type} algorithm (chunking not recommended)")
                         
                         if current_cached_dataset is None:
                             current_cached_dataset = load_dataset(current_dataset_path)
-                            # Update the appropriate cached dataset variable
+                            # update the appropriate cached dataset variable
                             if is_asymmetric:
                                 cached_asymmetric_dataset = current_cached_dataset
                             else:
                                 cached_symmetric_dataset = current_cached_dataset
                         
-                        # Perform encryption
+                        # perform encryption
                         ciphertext = measure_encryption_metrics(
                             metrics, 
                             implementation.encrypt, 
@@ -630,20 +540,19 @@ def run_benchmarks(config, implementations):
                             key
                         )
                         
-                        # Perform decryption
+                        # perform decryption
                         plaintext = measure_encryption_metrics(
                             metrics, 
                             implementation.decrypt, 
                             implementation, 
                             ciphertext, 
                             key,
-                            current_cached_dataset  # Pass original plaintext for correctness checking
+                            current_cached_dataset  # pass original plaintext for correctness checking
                         )
                         
-                        # The correctness check is handled by measure_decrypt in the metrics
-                        # But let's verify it was set correctly
+                        # the correctness check is handled by measure_decrypt in the metrics
                         if not hasattr(metrics, 'correctness_passed') or metrics.correctness_passed is None:
-                            # Fallback verification
+                            # fallback verification
                             if current_cached_dataset == plaintext:
                                 metrics.correctness_passed = True
                                 logger.info(f"Correctness check passed for {impl_description}")
@@ -651,20 +560,20 @@ def run_benchmarks(config, implementations):
                                 metrics.correctness_passed = False
                                 logger.error(f"Correctness check failed for {impl_description}")
                         
-                        # Set additional metrics
+                        # set additional metrics
                         metrics.input_size_bytes = len(current_cached_dataset)
                         metrics.decrypted_size_bytes = len(plaintext) if hasattr(plaintext, '__len__') else 0
                             
-                        # Clean up
+                        # clean up
                         del ciphertext
                         del plaintext
                         gc.collect()
                     
-                    # Add results
-                    iteration_results.append(metrics.to_dict(i + 1))  # Pass iteration number
+                    # add results
+                    iteration_results.append(metrics.to_dict(i + 1))  # pass iteration number
                     logger.info(f"Iteration {i+1} completed successfully")
                     
-                    # Memory usage logging
+                    # memory usage logging
                     if memory_tracking:
                         current, peak = tracemalloc.get_traced_memory()
                         logger.info(f"Memory after iteration {i+1}: Current {current / (1024*1024):.2f} MB, Peak {peak / (1024*1024):.2f} MB")
@@ -674,13 +583,13 @@ def run_benchmarks(config, implementations):
                     logger.error(f"Error in iteration {i+1}: {str(e)}")
                     traceback.print_exc()
                 
-                # Force GC between iterations
+                # force GC between iterations
                 gc.collect()
             
-            # Calculate aggregated metrics
+            # calculate aggregated metrics
             aggregated_metrics = calculate_aggregated_metrics(iteration_results, current_dataset_size)
             
-            # Add to results
+            # add to results
             results["encryption_results"][impl_name] = {
                 "iterations": iteration_results,
                 "aggregated_metrics": aggregated_metrics,
@@ -695,11 +604,11 @@ def run_benchmarks(config, implementations):
             logger.error(f"Error in benchmark for {impl_description}: {str(e)}")
             traceback.print_exc()
     
-    # Clean up memory tracking if enabled
+    # clean up memory tracking if enabled
     if memory_tracking:
         tracemalloc.stop()
     
-    # Clean up memory-mapped datasets if used
+    # clean up memory-mapped datasets if used
     if memory_mapped_symmetric_dataset is not None:
         memory_mapped_symmetric_dataset.close()
         logger.info("Closed memory-mapped symmetric dataset")
@@ -708,8 +617,8 @@ def run_benchmarks(config, implementations):
         memory_mapped_asymmetric_dataset.close()
         logger.info("Closed memory-mapped asymmetric dataset")
     
-    # Save results
-    session_id = os.path.basename(session_dir)  # Extract session name from path
+    # save results
+    session_id = os.path.basename(session_dir)  # extract session name from path
     success = save_results(results, session_dir, session_id)
     gc.collect()
     

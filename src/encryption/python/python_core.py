@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-CryptoBench Pro - Python Core Benchmarking Module
-Implements encryption benchmarking for Python implementations.
-"""
-
 import sys
 import gc
 import argparse
@@ -13,12 +7,12 @@ import traceback
 import os
 from pathlib import Path
 
-# Add the project root to the Python path
+# add the project root to the Python path
 script_dir = Path(__file__).parent.absolute()
-project_root = script_dir.parent.parent.parent  # Go up from python/core/ to project root
+project_root = script_dir.parent.parent.parent  # go up from python/core/ to project root
 sys.path.insert(0, str(project_root))
 
-# Setup logging
+# setup logging
 logger = logging.getLogger("PythonCore")
 logger.setLevel(logging.INFO)
 
@@ -29,18 +23,18 @@ if not logger.handlers:
     ch.setFormatter(formatter)
     logger.addHandler(ch)
 
-# Import core functionality from the refactored modules
+# import core functionality from the refactored modules
 from src.encryption.python.core.registry import register_all_implementations
 from src.encryption.python.core.benchmark_runner import run_benchmarks
 
 def main(config=None):
-    """Main entry point."""
+    # main entry point
     if not config:
         parser = argparse.ArgumentParser(description="Python Encryption Benchmarking")
         parser.add_argument("config_file", help="Path to the test configuration JSON file")
         args = parser.parse_args()
         
-        # Load configuration
+        # load configuration
         try:
             with open(args.config_file, 'r') as f:
                 config = json.load(f)
@@ -48,23 +42,23 @@ def main(config=None):
             logger.error(f"Error loading configuration: {str(e)}")
             return False
     
-    # Store original garbage collection state
+    # store original garbage collection state
     gc_was_enabled = gc.isenabled()
     
     try:
-        # Register all implementations
+        # register all implementations
         implementations = register_all_implementations()
         
-        # Run benchmarks
+        # run benchmarks
         result = run_benchmarks(config, implementations)
         
-        # Force cleanup of any remaining objects
+        # force cleanup of any remaining objects
         implementations = None
         config = None
         
-        # More aggressive cleanup
+        # more cleanup
         gc.collect()
-        gc.collect()  # Run twice to catch circular references
+        gc.collect()  # run twice to catch circular references
         
         return result
     except Exception as e:
@@ -72,7 +66,7 @@ def main(config=None):
         traceback.print_exc()
         return False
     finally:
-        # Cleanup any remaining variables
+        # cleanup any remaining variables
         try:
             if 'implementations' in locals():
                 implementations = None
@@ -81,21 +75,21 @@ def main(config=None):
         except:
             pass
         
-        # Restore original garbage collection state
+        # restore original garbage collection state
         if gc_was_enabled:
             gc.enable()
         else:
             gc.disable()
         
-        # Final aggressive cleanup to prevent segfaults
+        # final cleanup     
         gc.collect()
         gc.collect()
         
-        # Additional cleanup to prevent segmentation faults
+        # additional cleanup 
         try:
-            # Clear any global state that might interfere with subsequent runs
+            # clear any global state that might interfere with subsequent runs
             import threading
-            # Clear any thread-local storage that might be holding onto C objects
+            # clear any thread-local storage 
             if hasattr(threading, 'current_thread'):
                 thread = threading.current_thread()
                 if hasattr(thread, '__dict__'):

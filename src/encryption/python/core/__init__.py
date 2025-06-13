@@ -1,12 +1,6 @@
-#!/usr/bin/env python3
-"""
-CryptoBench Pro - Python Core Module
-Provides core functionality for benchmarking encryption implementations.
-"""
-
 import logging
 
-# Configure logging
+# configure logging
 logger = logging.getLogger("PythonCore")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -15,19 +9,17 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-# Import key components
+# import components
 from .metrics import BenchmarkMetrics
-from .utils import MemoryMappedDataset, RotatingKeySet, load_dataset
+from .utils import MemoryMappedDataset, load_dataset
 from .results import calculate_aggregated_metrics, save_results
 from .measurement import measure_encryption_metrics
 from .registry import register_implementation, list_implementations, register_all_implementations
 from .benchmark_runner import run_benchmarks
 
-# Expose core functionality
 __all__ = [
     'BenchmarkMetrics',
     'MemoryMappedDataset',
-    'RotatingKeySet',
     'load_dataset',
     'calculate_aggregated_metrics',
     'save_results',
