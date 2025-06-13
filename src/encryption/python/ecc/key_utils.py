@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-CryptoBench Pro - ECC Key Utilities
-Provides key generation and management functions for ECC implementations.
-"""
-
 import os
 import hashlib
 import secrets
@@ -11,7 +5,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 
-# Map curve names to their corresponding cryptography.io curve objects
+# map curve names to their corresponding cryptography.io curve objects
 CURVE_MAP = {
     "P-256": ec.SECP256R1(),
     "P-384": ec.SECP384R1(),
@@ -19,15 +13,7 @@ CURVE_MAP = {
 }
 
 def generate_key_pair(curve_name="P-256"):
-    """
-    Generate an ECC key pair using the standard library.
-    
-    Args:
-        curve_name: The name of the elliptic curve to use
-        
-    Returns:
-        tuple: (public_key, private_key) pair
-    """
+
     if curve_name not in CURVE_MAP:
         raise ValueError(f"Unsupported curve: {curve_name}. Supported curves: {list(CURVE_MAP.keys())}")
     
@@ -38,17 +24,7 @@ def generate_key_pair(curve_name="P-256"):
     return public_key, private_key
 
 def serialize_key(key, is_private=False, password=None):
-    """
-    Serialize a key to PEM format.
     
-    Args:
-        key: The key to serialize
-        is_private: Whether the key is a private key
-        password: Optional password for encrypting private keys
-        
-    Returns:
-        bytes: The PEM-encoded key
-    """
     if is_private:
         encryption = serialization.BestAvailableEncryption(password.encode()) if password else serialization.NoEncryption()
         return key.private_bytes(
@@ -63,33 +39,24 @@ def serialize_key(key, is_private=False, password=None):
         )
 
 def extract_key_components(key, curve_name="P-256"):
-    """
-    Extract the raw components of an ECC key.
     
-    Args:
-        key: The key to extract components from
-        curve_name: The name of the curve
-        
-    Returns:
-        dict: Dictionary containing key components
-    """
     components = {
         "curve": curve_name
     }
     
     try:
-        # Extract public key components
+        # extract public key components
         if hasattr(key, "public_numbers"):
-            # Private key input, get public numbers from it
+            # private key input, get public numbers from it
             public_numbers = key.public_key().public_numbers()
         else:
-            # Public key input
+            # public key input
             public_numbers = key.public_numbers()
         
         components["x"] = public_numbers.x
         components["y"] = public_numbers.y
         
-        # Extract private key component if available
+        # extract private key component if available
         if hasattr(key, "private_numbers"):
             components["d"] = key.private_numbers().private_value
     except Exception as e:
@@ -97,9 +64,9 @@ def extract_key_components(key, curve_name="P-256"):
     
     return components
 
-# Custom ECC implementation below
+# custom ECC implementation below
 
-# Constants for elliptic curves
+# constants for elliptic curves
 # P-256/secp256r1 parameters
 P256 = {
     "p": 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF,
@@ -112,7 +79,7 @@ P256 = {
     "bits": 256
 }
 
-# P-384/secp384r1 parameters
+# P-384/secp384r1
 P384 = {
     "p": 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFF0000000000000000FFFFFFFF,
     "a": 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFF0000000000000000FFFFFFFC,
@@ -124,7 +91,7 @@ P384 = {
     "bits": 384
 }
 
-# P-521/secp521r1 parameters
+# P-521/secp521r1
 P521 = {
     "p": 0x01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
     "a": 0x01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC,
@@ -136,7 +103,7 @@ P521 = {
     "bits": 521
 }
 
-# Map curve names to their parameter sets
+# map curve names to their parameter sets
 CURVE_PARAMS = {
     "P-256": P256,
     "P-384": P384,
@@ -144,38 +111,28 @@ CURVE_PARAMS = {
 }
 
 def point_add(P, Q, curve):
-    """
-    Add two points on an elliptic curve.
     
-    Args:
-        P: First point as (x, y) tuple or None for point at infinity
-        Q: Second point as (x, y) tuple or None for point at infinity
-        curve: Curve parameters
-        
-    Returns:
-        tuple: Resulting point (x, y) or None for point at infinity
-    """
     if P is None:
         return Q
     if Q is None:
         return P
     
     if P[0] == Q[0] and P[1] != Q[1]:
-        return None  # Point at infinity
+        return None  # point at infinity
     
     p = curve["p"]
     
     if P == Q:
-        # Point doubling
+        # point doubling
         lam_num = (3 * P[0]**2 + curve["a"]) % p
         lam_den = (2 * P[1]) % p
-        lam_den_inv = pow(lam_den, p - 2, p)  # Modular inverse
+        lam_den_inv = pow(lam_den, p - 2, p)  # modular inverse
         lam = (lam_num * lam_den_inv) % p
     else:
-        # Point addition
+        # point addition
         lam_num = (Q[1] - P[1]) % p
         lam_den = (Q[0] - P[0]) % p
-        lam_den_inv = pow(lam_den, p - 2, p)  # Modular inverse
+        lam_den_inv = pow(lam_den, p - 2, p)  # modular inverse
         lam = (lam_num * lam_den_inv) % p
     
     x3 = (lam**2 - P[0] - Q[0]) % p
@@ -184,62 +141,43 @@ def point_add(P, Q, curve):
     return (x3, y3)
 
 def scalar_multiply(k, P, curve):
-    """
-    Multiply a point by a scalar using an optimized double-and-add algorithm.
-    Uses Montgomery ladder for efficiency and constant-time operation.
     
-    Args:
-        k: Scalar value
-        P: Point as (x, y) tuple or None for point at infinity
-        curve: Curve parameters
-        
-    Returns:
-        tuple: Resulting point (x, y) or None for point at infinity
-    """
     if k == 0 or P is None:
         return None
     
-    # Use Montgomery ladder for efficiency and constant-time operation
+    # use Montgomery ladder for efficiency and constant-time operation
     R0 = None
     R1 = P
     
-    # Convert k to binary and iterate through bits
+    # convert k to binary and iterate through bits
     for i in range(k.bit_length()-1, -1, -1):
         if k & (1 << i) == 0:
-            # If bit is 0: R1 = R0 + R1, R0 = 2R0
+            # if bit is 0: R1 = R0 + R1, R0 = 2R0
             R1 = point_add(R0, R1, curve)
             R0 = point_add(R0, R0, curve)
         else:
-            # If bit is 1: R0 = R0 + R1, R1 = 2R1
+            # if bit is 1: R0 = R0 + R1, R1 = 2R1
             R0 = point_add(R0, R1, curve)
             R1 = point_add(R1, R1, curve)
     
     return R0
 
 def generate_custom_key_pair(curve_name="P-256"):
-    """
-    Generate an ECC key pair using a custom implementation.
     
-    Args:
-        curve_name: The name of the elliptic curve to use
-        
-    Returns:
-        tuple: (public_key, private_key) pair as component dictionaries
-    """
     if curve_name not in CURVE_PARAMS:
         raise ValueError(f"Unsupported curve for custom implementation: {curve_name}. Supported curves: {list(CURVE_PARAMS.keys())}")
     
-    # Get curve parameters
+    # get curve parameters
     curve = CURVE_PARAMS[curve_name]
     
-    # Generate private key (random integer between 1 and n-1)
+    # generate private key (random integer between 1 and n-1)
     private_value = secrets.randbelow(curve["n"] - 1) + 1
     
-    # Compute public key Q = d * G (where G is the base point)
+    # compute public key Q = d * G (where G is the base point)
     G = (curve["G_x"], curve["G_y"])
     Q = scalar_multiply(private_value, G, curve)
     
-    # Return as component dictionaries
+    # return as component dictionaries
     public_key = {
         "curve": curve_name,
         "x": Q[0],
@@ -257,30 +195,12 @@ def generate_custom_key_pair(curve_name="P-256"):
 
 # Stream mode utility functions
 def add_chunk_delimiter(chunk_data, chunk_index=0):
-    """
-    Add a delimiter to a chunk for stream mode processing.
-    Format: 4 bytes for chunk index + 4 bytes for chunk length
     
-    Args:
-        chunk_data: Data chunk to delimit
-        chunk_index: Index of this chunk in the sequence
-        
-    Returns:
-        bytes: Delimited chunk data
-    """
     chunk_header = chunk_index.to_bytes(4, byteorder='big') + len(chunk_data).to_bytes(4, byteorder='big')
     return chunk_header + chunk_data
 
 def split_delimited_chunks(combined_data):
-    """
-    Split combined data back into original chunks based on delimiters.
     
-    Args:
-        combined_data: Combined data with delimiters
-        
-    Returns:
-        list: List of (chunk_index, chunk_data) tuples
-    """
     chunks = []
     offset = 0
     
@@ -289,7 +209,7 @@ def split_delimited_chunks(combined_data):
         chunk_length = int.from_bytes(combined_data[offset+4:offset+8], byteorder='big')
         
         if offset + 8 + chunk_length > len(combined_data):
-            break  # Incomplete chunk
+            break  # incomplete chunk
             
         chunk_data = combined_data[offset+8:offset+8+chunk_length]
         chunks.append((chunk_index, chunk_data))
