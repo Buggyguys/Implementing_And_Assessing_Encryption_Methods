@@ -490,62 +490,123 @@ def run_benchmarks(config, implementations):
                     # Load or map dataset based on processing strategy
                     if processing_strategy == "Stream" and not is_asymmetric:
                         # Use stream mode for symmetric algorithms (asymmetric doesn't work well with chunking)
-                        if current_memory_mapped_dataset is None:
-                            current_memory_mapped_dataset = MemoryMappedDataset(current_dataset_path)
-                            if is_asymmetric:
-                                memory_mapped_asymmetric_dataset = current_memory_mapped_dataset
+                        
+                        # Check if the implementation has explicit stream methods
+                        if hasattr(implementation, 'encrypt_stream') and hasattr(implementation, 'decrypt_stream'):
+                            # Use implementation's own stream methods with user-specified chunk size
+                            logger.info(f"Using implementation's native stream mode with chunk size {chunk_size} bytes")
+                            
+                            # Load the entire dataset for stream processing
+                            if current_cached_dataset is None:
+                                current_cached_dataset = load_dataset(current_dataset_path)
+                                if is_asymmetric:
+                                    cached_asymmetric_dataset = current_cached_dataset
+                                else:
+                                    cached_symmetric_dataset = current_cached_dataset
+                            
+                            # Use the implementation's stream methods
+                            # Create wrapper functions with proper names for measurement
+                            def encrypt_stream_wrapper(data, key):
+                                return implementation.encrypt_stream(data, key, chunk_size)
+                            encrypt_stream_wrapper.__name__ = 'encrypt'
+                            
+                            def decrypt_stream_wrapper(data, key):
+                                return implementation.decrypt_stream(data, key, chunk_size)
+                            decrypt_stream_wrapper.__name__ = 'decrypt'
+                            
+                            ciphertext = measure_encryption_metrics(
+                                metrics, 
+                                encrypt_stream_wrapper, 
+                                implementation, 
+                                current_cached_dataset, 
+                                key
+                            )
+                            
+                            plaintext = measure_encryption_metrics(
+                                metrics, 
+                                decrypt_stream_wrapper, 
+                                implementation, 
+                                ciphertext, 
+                                key,
+                                current_cached_dataset  # For correctness checking
+                            )
+                            
+                            # Verify correctness
+                            if current_cached_dataset == plaintext:
+                                metrics.correctness_passed = True
+                                logger.info(f"Correctness check passed for {impl_description}")
                             else:
-                                memory_mapped_symmetric_dataset = current_memory_mapped_dataset
-                            
-                        # Use streaming processing with chunked approach
-                        chunk_size = 1024 * 1024  # 1MB chunks
-                        total_chunks = (current_dataset_size + chunk_size - 1) // chunk_size
-                        
-                        logger.info(f"Processing {total_chunks} chunks of {chunk_size} bytes each using stream mode")
-                        
-                        # Collect all chunks first for proper measurement
-                        all_chunks = list(current_memory_mapped_dataset.create_chunks(chunk_size))
-                        
-                        # Use the proper measurement system for encryption
-                        encrypted_chunks = measure_chunked_encryption(
-                            metrics,
-                            implementation.encrypt,
-                            implementation,
-                            all_chunks,
-                            key,
-                            chunk_size
-                        )
-                        
-                        # Use the proper measurement system for decryption
-                        decrypted_chunks = measure_chunked_encryption(
-                            metrics,
-                            implementation.decrypt,
-                            implementation,
-                            encrypted_chunks,
-                            key,
-                            chunk_size,
-                            all_chunks  # Pass original chunks for correctness checking
-                        )
-                        
-                        # Verify correctness by comparing chunks
-                        correctness_checks = min(5, len(all_chunks))  # Check up to 5 chunks
-                        for check_idx in range(correctness_checks):
-                            if all_chunks[check_idx] != decrypted_chunks[check_idx]:
-                                logger.error(f"Correctness check failed for chunk {check_idx}")
                                 metrics.correctness_passed = False
-                                break
-                        else:
-                            metrics.correctness_passed = True
+                                logger.error(f"Correctness check failed for {impl_description}")
                             
-                        # Set additional metrics
-                        metrics.input_size_bytes = current_dataset_size
-                        metrics.decrypted_size_bytes = sum(len(chunk) for chunk in decrypted_chunks)
-                        
-                        # Clean up chunks to free memory
-                        del all_chunks
-                        del encrypted_chunks
-                        del decrypted_chunks
-                        gc.collect()
+                            # Set additional metrics
+                            metrics.input_size_bytes = len(current_cached_dataset)
+                            metrics.decrypted_size_bytes = len(plaintext) if hasattr(plaintext, '__len__') else 0
+                            
+                            # Clean up
+                            del ciphertext
+                            del plaintext
+                            gc.collect()
+                            
+                        else:
+                            # Fallback to chunked processing using regular encrypt/decrypt methods
+                            logger.info(f"Using chunked fallback mode (implementation lacks native stream methods)")
+                            
+                            if current_memory_mapped_dataset is None:
+                                current_memory_mapped_dataset = MemoryMappedDataset(current_dataset_path)
+                                if is_asymmetric:
+                                    memory_mapped_asymmetric_dataset = current_memory_mapped_dataset
+                                else:
+                                    memory_mapped_symmetric_dataset = current_memory_mapped_dataset
+                                
+                            # Use streaming processing with chunked approach (use user-specified chunk size)
+                            total_chunks = (current_dataset_size + chunk_size - 1) // chunk_size
+                            
+                            logger.info(f"Processing {total_chunks} chunks of {chunk_size} bytes each using fallback chunked mode")
+                            
+                            # Collect all chunks first for proper measurement
+                            all_chunks = list(current_memory_mapped_dataset.create_chunks(chunk_size))
+                            
+                            # Use the proper measurement system for encryption
+                            encrypted_chunks = measure_chunked_encryption(
+                                metrics,
+                                implementation.encrypt,
+                                implementation,
+                                all_chunks,
+                                key,
+                                chunk_size
+                            )
+                            
+                            # Use the proper measurement system for decryption
+                            decrypted_chunks = measure_chunked_encryption(
+                                metrics,
+                                implementation.decrypt,
+                                implementation,
+                                encrypted_chunks,
+                                key,
+                                chunk_size,
+                                all_chunks  # Pass original chunks for correctness checking
+                            )
+                            
+                            # Verify correctness by comparing chunks
+                            correctness_checks = min(5, len(all_chunks))  # Check up to 5 chunks
+                            for check_idx in range(correctness_checks):
+                                if all_chunks[check_idx] != decrypted_chunks[check_idx]:
+                                    logger.error(f"Correctness check failed for chunk {check_idx}")
+                                    metrics.correctness_passed = False
+                                    break
+                            else:
+                                metrics.correctness_passed = True
+                                
+                            # Set additional metrics
+                            metrics.input_size_bytes = current_dataset_size
+                            metrics.decrypted_size_bytes = sum(len(chunk) for chunk in decrypted_chunks)
+                            
+                            # Clean up chunks to free memory
+                            del all_chunks
+                            del encrypted_chunks
+                            del decrypted_chunks
+                            gc.collect()
                         
                     else:
                         # Memory mode: Load entire dataset (or force memory mode for asymmetric algorithms)
