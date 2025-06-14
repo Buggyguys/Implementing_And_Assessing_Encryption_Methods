@@ -23,7 +23,7 @@
 #define AUTH_TAG_SIZE 16 // 16 bytes (128 bits) for authentication tag
 
 // ECIES (Elliptic Curve Integrated Encryption Scheme) for hybrid decryption
-unsigned char* ecc_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* ecc_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     ecc_context_t* ecc_context = (ecc_context_t*)context;
@@ -234,7 +234,7 @@ unsigned char* ecc_decrypt_stream(void* context, const unsigned char* data, int 
 }
 
 // Custom implementation decryption (wrapper around standard implementation)
-unsigned char* ecc_custom_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* ecc_custom_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     return ecc_decrypt(context, data, data_length, key, output_length);
 }
 

@@ -69,7 +69,7 @@ unsigned char* aes_cfb_encrypt(aes_context_t* context, const unsigned char* data
     return output;
 }
 
-unsigned char* aes_cfb_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* aes_cfb_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Calculate tag size for authentication
@@ -210,7 +210,7 @@ unsigned char* aes_cfb_custom_encrypt(aes_context_t* context, const unsigned cha
     return output;
 }
 
-unsigned char* aes_cfb_custom_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* aes_cfb_custom_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Calculate tag size for authentication
@@ -378,7 +378,7 @@ unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned ch
     return output;
 }
 
-unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Ensure we have enough data (at least for the IV)
@@ -476,8 +476,4 @@ unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned ch
     return NULL;
 }
 
-unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    fprintf(stderr, "Error: OpenSSL not available - AES-CFB OpenSSL implementation not supported\n");
-    return NULL;
-}
 #endif 

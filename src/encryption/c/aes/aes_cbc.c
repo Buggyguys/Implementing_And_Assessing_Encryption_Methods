@@ -63,7 +63,7 @@ unsigned char* aes_cbc_encrypt(aes_context_t* context, const unsigned char* data
     return output;
 }
 
-unsigned char* aes_cbc_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* aes_cbc_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // For testing, we'll implement a simple CBC decryption with authentication
@@ -211,7 +211,7 @@ unsigned char* aes_cbc_custom_encrypt(aes_context_t* context, const unsigned cha
     return output;
 }
 
-unsigned char* aes_cbc_custom_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* aes_cbc_custom_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Calculate tag size for authentication

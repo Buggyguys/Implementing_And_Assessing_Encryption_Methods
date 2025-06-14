@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include "crypto_utils.h"
 
 // Maximum input size for chunked processing
 #define MAX_CHUNK_SIZE (16 * 1024 * 1024)  // 16MB default chunk size
@@ -419,22 +420,28 @@ static inline unsigned char* read_file(const char* filename, size_t* size) {
         return NULL;
     }
     
-    unsigned char* buffer = (unsigned char*)malloc(*size);
+    printf("[DEBUG] read_file: attempting to allocate %zu bytes (%.2f MB) for file %s\n", 
+           *size, *size / (1024.0 * 1024.0), filename);
+    
+    unsigned char* buffer = (unsigned char*)crypto_secure_alloc(*size);
     if (!buffer) {
-        fprintf(stderr, "Error: Could not allocate memory for file %s\n", filename);
+        fprintf(stderr, "Error: Could not allocate memory for file %s (size: %zu bytes)\n", filename, *size);
         fclose(file);
         return NULL;
     }
     
+    printf("[DEBUG] read_file: allocation successful, reading file...\n");
     size_t bytes_read = fread(buffer, 1, *size, file);
     fclose(file);
     
     if (bytes_read != *size) {
-        fprintf(stderr, "Error: Could not read entire file %s\n", filename);
-        free(buffer);
+        fprintf(stderr, "Error: Could not read entire file %s (expected %zu bytes, got %zu bytes)\n", 
+                filename, *size, bytes_read);
+        crypto_secure_free(buffer, *size);
         return NULL;
     }
     
+    printf("[DEBUG] read_file: successfully read %zu bytes\n", bytes_read);
     return buffer;
 }
 

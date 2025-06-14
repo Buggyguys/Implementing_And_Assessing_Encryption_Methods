@@ -29,12 +29,12 @@ typedef struct {
 // Function to register all RSA implementations
 void register_rsa_implementations(implementation_registry_t* registry);
 
-// Standard library implementation functions
+// Function prototypes for RSA implementations
 void* rsa_init(void);
 void rsa_cleanup(void* context);
 unsigned char* rsa_generate_key(void* context, int* key_length);
-unsigned char* rsa_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length);
-unsigned char* rsa_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length);
+unsigned char* rsa_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length);
+unsigned char* rsa_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length);
 
 // Stream processing functions
 unsigned char* rsa_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
@@ -44,8 +44,8 @@ unsigned char* rsa_decrypt_stream(void* context, const unsigned char* data, int 
 void* rsa_custom_init(void);
 void rsa_custom_cleanup(void* context);
 unsigned char* rsa_custom_generate_key(void* context, int* key_length);
-unsigned char* rsa_custom_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length);
-unsigned char* rsa_custom_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length);
+unsigned char* rsa_custom_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length);
+unsigned char* rsa_custom_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length);
 unsigned char* rsa_custom_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
 unsigned char* rsa_custom_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
 

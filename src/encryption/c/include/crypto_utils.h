@@ -82,16 +82,27 @@ static inline int crypto_random_bytes(unsigned char* buffer, size_t size) {
  */
 static inline void* crypto_secure_alloc(size_t size) {
     if (size == 0) return NULL;
+    
+    printf("    [DEBUG] Attempting to allocate %zu bytes (%.2f MB)\n", 
+           size, (double)size / (1024.0 * 1024.0));
 
 #ifdef USE_OPENSSL
     // Use OpenSSL's secure memory functions if available
-    return OPENSSL_malloc(size);
+    void* ptr = OPENSSL_malloc(size);
+    if (!ptr) {
+        printf("    [DEBUG] OpenSSL malloc failed for %zu bytes\n", size);
+    }
+    return ptr;
 #else
     // Otherwise use standard malloc and manually zero the memory
     void* ptr = malloc(size);
-    if (ptr) {
-        memset(ptr, 0, size);
+    if (!ptr) {
+        printf("    [DEBUG] Standard malloc failed for %zu bytes\n", size);
+        return NULL;
+    } else {
+        printf("    [DEBUG] Allocation successful, zeroing memory...\n");
     }
+    memset(ptr, 0, size);
     return ptr;
 #endif
 }

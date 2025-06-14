@@ -1,10 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <limits.h>
 
 #include "implementation.h"
 #include "../include/utils.h"
+#include "../include/crypto_utils.h"
 #include "aes_common.h"
 #include "aes_key.h"
 #include "aes_gcm.h"
@@ -107,7 +108,7 @@ void* aes_init(void) {
     context->key = NULL;
     context->key_length = 0;
     context->iv = NULL;
-    context->iv_length = 0;
+    context->iv_length = crypto_get_standard_iv_size("AES", context->mode);
     
     return context;
 }
@@ -130,7 +131,7 @@ void aes_cleanup(void* context) {
     free(aes_context);
 }
 
-unsigned char* aes_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* aes_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     aes_context_t* aes_context = (aes_context_t*)context;
@@ -160,27 +161,53 @@ unsigned char* aes_encrypt(void* context, const unsigned char* data, int data_le
     // Encrypt based on mode
     if (strcmp(aes_context->mode, "GCM") == 0) {
         #ifdef USE_OPENSSL
-        return aes_gcm_openssl_encrypt(aes_context, data, data_length, output_length);
+        // For OpenSSL, we would need to handle large sizes appropriately
+        // For now, pass size_t directly to our implementation
+        return aes_gcm_encrypt(aes_context, data, data_length, output_length);
         #else
         return aes_gcm_encrypt(aes_context, data, data_length, output_length);
         #endif
     } else if (strcmp(aes_context->mode, "CBC") == 0) {
         #ifdef USE_OPENSSL
-        return aes_cbc_openssl_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_cbc_openssl_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
-        return aes_cbc_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_cbc_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #endif
     } else if (strcmp(aes_context->mode, "CFB") == 0) {
         #ifdef USE_OPENSSL
-        return aes_cfb_openssl_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_cfb_openssl_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
-        return aes_cfb_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_cfb_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #endif
     } else if (strcmp(aes_context->mode, "OFB") == 0) {
         #ifdef USE_OPENSSL
-        return aes_ofb_openssl_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_ofb_openssl_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
-        return aes_ofb_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_ofb_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #endif
     } else {
         fprintf(stderr, "Error: Unsupported AES mode: %s\n", aes_context->mode);
@@ -188,7 +215,7 @@ unsigned char* aes_encrypt(void* context, const unsigned char* data, int data_le
     }
 }
 
-unsigned char* aes_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* aes_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     aes_context_t* aes_context = (aes_context_t*)context;
@@ -276,7 +303,7 @@ void* aes_custom_init(void) {
     context->key = NULL;
     context->key_length = 0;
     context->iv = NULL;
-    context->iv_length = 0;
+    context->iv_length = crypto_get_standard_iv_size("AES", context->mode);
     
     return context;
 }
@@ -285,7 +312,7 @@ void aes_custom_cleanup(void* context) {
     aes_cleanup(context); // Reuse standard cleanup
 }
 
-unsigned char* aes_custom_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* aes_custom_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     aes_context_t* aes_context = (aes_context_t*)context;
@@ -316,18 +343,30 @@ unsigned char* aes_custom_encrypt(void* context, const unsigned char* data, int 
     if (strcmp(aes_context->mode, "GCM") == 0) {
         return aes_gcm_custom_encrypt(aes_context, data, data_length, output_length);
     } else if (strcmp(aes_context->mode, "CBC") == 0) {
-        return aes_cbc_custom_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_cbc_custom_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
     } else if (strcmp(aes_context->mode, "CFB") == 0) {
-        return aes_cfb_custom_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_cfb_custom_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
     } else if (strcmp(aes_context->mode, "OFB") == 0) {
-        return aes_ofb_custom_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_ofb_custom_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
     } else {
         fprintf(stderr, "Error: Unsupported AES mode: %s\n", aes_context->mode);
         return NULL;
     }
 }
 
-unsigned char* aes_custom_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* aes_custom_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     aes_context_t* aes_context = (aes_context_t*)context;
@@ -376,7 +415,11 @@ unsigned char* aes_encrypt_stream(void* context, const unsigned char* data, int 
     // For stream processing, we handle each chunk separately but maintain state across chunks if needed
     
     // In a real implementation, this would maintain state across chunks for certain modes (like CBC)
-    return aes_encrypt(context, data, data_length, key, output_length);
+    size_t data_len = (size_t)data_length;
+    size_t out_len = 0;
+    unsigned char* result = aes_encrypt(context, data, data_len, key, &out_len);
+    if (output_length) *output_length = (int)out_len;
+    return result;
 }
 
 unsigned char* aes_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {

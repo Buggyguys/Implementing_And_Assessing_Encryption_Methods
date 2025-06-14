@@ -709,23 +709,27 @@ void run_benchmarks(TestConfig* config) {
             
             // Measure encryption with nanosecond precision
             unsigned char* ciphertext = NULL;
-            int ciphertext_length = 0;
+            size_t ciphertext_length = 0;
             uint64_t encrypt_time_ns = 0;
             resource_usage_t encrypt_diff = {0};
             
             if (strategy == PROCESSING_MEMORY) {
                 printf("    Encrypting data (Memory mode)...\n");
+                printf("    Processing %zu MB dataset in Memory mode...\n", data_size / (1024 * 1024));
+                
                 uint64_t encrypt_start_time = get_time_ns();
                 resource_usage_t encrypt_start_usage = get_resource_usage();
                 
+                printf("    [DEBUG] About to call impl->encrypt() with %zu bytes\n", data_size);
                 ciphertext = impl->encrypt(ctx, test_data, data_size, key, &ciphertext_length);
+                printf("    [DEBUG] impl->encrypt() returned, ciphertext=%p, length=%zu\n", (void*)ciphertext, ciphertext_length);
                 
                 uint64_t encrypt_end_time = get_time_ns();
                 resource_usage_t encrypt_end_usage = get_resource_usage();
                 encrypt_diff = resource_usage_diff(encrypt_start_usage, encrypt_end_usage);
                 
                 if (!ciphertext) {
-                    fprintf(stderr, "Error: Encryption failed\n");
+                    fprintf(stderr, "Error: Encryption failed in Memory mode\n");
                     free(key);
                     impl->cleanup(ctx);
                     continue;
@@ -747,8 +751,21 @@ void run_benchmarks(TestConfig* config) {
                 size_t total_chunks = (cf->file_size + chunk_size - 1) / chunk_size;
                 printf("    Dataset will be processed in %zu chunks\n", total_chunks);
                 
-                // Allocate buffer for all ciphertext (approximate size)
-                size_t max_ciphertext_size = cf->file_size + (cf->file_size / 10) + 1024 + (total_chunks * 8); // Add space for chunk headers
+                // Allocate buffer for all ciphertext with proper overhead calculation
+                // For AES-GCM: each chunk gets IV (12 bytes) + tag (16 bytes) = 28 bytes overhead
+                // Plus 4 bytes header per chunk for size storage
+                size_t overhead_per_chunk = 32; // IV + tag + header (conservative estimate)
+                size_t total_overhead = total_chunks * overhead_per_chunk;
+                size_t max_ciphertext_size = cf->file_size + total_overhead + (cf->file_size / 10); // Add 10% extra safety margin for large files
+                
+                // For very large files, ensure we have enough space
+                if (cf->file_size > 1000000000) { // > 1GB
+                    max_ciphertext_size = cf->file_size + total_overhead + (cf->file_size / 5); // Add 20% extra for very large files
+                }
+                
+                printf("    Allocating %zu MB for ciphertext (%zu chunks × %zu bytes overhead)\n", 
+                       max_ciphertext_size / (1024 * 1024), total_chunks, overhead_per_chunk);
+                
                 ciphertext = (unsigned char*)malloc(max_ciphertext_size);
                 if (!ciphertext) {
                     fprintf(stderr, "Error: Failed to allocate memory for ciphertext\n");
@@ -784,7 +801,7 @@ void run_benchmarks(TestConfig* config) {
                                (chunk_counter * 100.0) / total_chunks);
                     }
                     
-                    int chunk_output_length = 0;
+                    size_t chunk_output_length = 0;
                     unsigned char* chunk_ciphertext = impl->encrypt(ctx, cf->current_chunk, bytes_read, key, &chunk_output_length);
                     
                     if (!chunk_ciphertext) {
@@ -811,7 +828,11 @@ void run_benchmarks(TestConfig* config) {
                         memcpy(ciphertext + ciphertext_length, chunk_ciphertext, chunk_output_length);
                         ciphertext_length += chunk_output_length;
                     } else {
-                        fprintf(stderr, "Error: Ciphertext buffer overflow\n");
+                        fprintf(stderr, "Error: Ciphertext buffer overflow at chunk %zu\n", chunk_counter);
+                        fprintf(stderr, "  Current length: %zu, chunk size: %zu, buffer size: %zu\n", 
+                                ciphertext_length, chunk_output_length, max_ciphertext_size);
+                        fprintf(stderr, "  Required: %zu, available: %zu\n", 
+                                ciphertext_length + 4 + chunk_output_length, max_ciphertext_size);
                         free(chunk_ciphertext);
                         free(ciphertext);
                         free(chunk_sizes);
@@ -864,7 +885,7 @@ void run_benchmarks(TestConfig* config) {
             
             // Measure decryption with nanosecond precision
             unsigned char* decrypted = NULL;
-            int plaintext_length = 0;
+            size_t plaintext_length = 0;
             uint64_t decrypt_time_ns = 0;
             resource_usage_t decrypt_diff = {0};
             
@@ -882,7 +903,7 @@ void run_benchmarks(TestConfig* config) {
             } else {
                 // Stream processing - decrypt in chunks (reverse the encryption process)
                 printf("    Decrypting data (Stream mode)...\n");
-                printf("    Decrypting %d bytes of ciphertext in chunks...\n", ciphertext_length);
+                printf("    Decrypting %zu bytes of ciphertext in chunks...\n", ciphertext_length);
                 
                 uint64_t decrypt_start_time = get_time_ns();
                 resource_usage_t decrypt_start_usage = get_resource_usage();
@@ -932,7 +953,7 @@ void run_benchmarks(TestConfig* config) {
                         break;
                     }
                     
-                    int chunk_plaintext_length = 0;
+                    size_t chunk_plaintext_length = 0;
                     unsigned char* chunk_decrypted = impl->decrypt(ctx, 
                         ciphertext + ciphertext_offset, 
                         chunk_ciphertext_size, 
@@ -968,7 +989,7 @@ void run_benchmarks(TestConfig* config) {
                 decrypt_time_ns = decrypt_end_time - decrypt_start_time;
                 
                 if (decrypted) {
-                    printf("    Decrypted %zu chunks successfully, total plaintext: %d bytes\n", chunk_counter, plaintext_length);
+                    printf("    Decrypted %zu chunks successfully, total plaintext: %zu bytes\n", chunk_counter, plaintext_length);
                 }
             }
             
@@ -1001,7 +1022,10 @@ void run_benchmarks(TestConfig* config) {
             
             // Check correctness (if decryption result matches original data)
             int is_correct = 0;
-            if (plaintext_length == data_size && memcmp(decrypted, test_data, data_size) == 0) {
+            printf("    [DEBUG] Starting verification (plaintext_length=%zu, data_size=%zu, test_data=%p)\n", 
+                   plaintext_length, data_size, (void*)test_data);
+            
+            if (test_data && plaintext_length == data_size && memcmp(decrypted, test_data, data_size) == 0) {
                 is_correct = 1;
                 printf("    Verification: Data integrity check passed\n");
             } else {
@@ -1025,12 +1049,12 @@ void run_benchmarks(TestConfig* config) {
                         // In stream mode, we consider it correct if lengths are close enough
                         is_correct = 1;
                     } else {
-                        printf("    Verification (Stream mode): FAILED - Length mismatch (got %d, expected %zu, diff %zu bytes/%.3f%%)\n", 
+                        printf("    Verification (Stream mode): FAILED - Length mismatch (got %zu, expected %zu, diff %zu bytes/%.3f%%)\n", 
                                plaintext_length, data_size, length_difference, 
                                (double)length_difference / data_size * 100.0);
                     }
                 } else if (plaintext_length != data_size) {
-                    printf("    Verification: FAILED - Length mismatch (got %d, expected %zu)\n", 
+                    printf("    Verification: FAILED - Length mismatch (got %zu, expected %zu)\n", 
                            plaintext_length, data_size);
                 } else {
                     printf("    Verification: FAILED - Content mismatch\n");
@@ -1071,14 +1095,34 @@ void run_benchmarks(TestConfig* config) {
             // Add iteration to array
             cJSON_AddItemToArray(iterations_array, iter_obj);
             
+            printf("    [DEBUG] Starting cleanup after iteration %d\n", iter + 1);
+            
             // Clean up
-            free(decrypted);
-            free(ciphertext);
-            free(key);
+            printf("    [DEBUG] Cleaning up decrypted data\n");
+            if (decrypted) {
+                free(decrypted);
+                decrypted = NULL;
+            }
+            
+            printf("    [DEBUG] Cleaning up ciphertext\n");
+            if (ciphertext) {
+                free(ciphertext);
+                ciphertext = NULL;
+            }
+            
+            printf("    [DEBUG] Cleaning up key\n");
+            if (key) {
+                free(key);
+                key = NULL;
+            }
+            
+            printf("    [DEBUG] Cleaning up test_data\n");
             if (test_data) {
-                free(test_data);
+                crypto_secure_free(test_data, data_size);
                 test_data = NULL;
             }
+            
+            printf("    [DEBUG] Cleanup complete\n");
             
             printf("    Iteration %d completed %s\n", iter + 1, 
                    is_correct ? "successfully" : "with verification failures");

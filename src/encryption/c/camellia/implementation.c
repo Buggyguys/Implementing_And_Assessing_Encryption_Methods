@@ -130,7 +130,7 @@ void camellia_cleanup(void* context) {
     free(camellia_context);
 }
 
-unsigned char* camellia_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* camellia_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     camellia_context_t* camellia_context = (camellia_context_t*)context;
@@ -160,23 +160,53 @@ unsigned char* camellia_encrypt(void* context, const unsigned char* data, int da
     // Encrypt based on mode
     if (strcmp(camellia_context->mode, "CBC") == 0) {
         #ifdef USE_OPENSSL
-        return camellia_cbc_openssl_encrypt(camellia_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_cbc_openssl_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
-        return camellia_cbc_encrypt(camellia_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_cbc_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #endif
     } else if (strcmp(camellia_context->mode, "CFB") == 0) {
-        return camellia_cfb_encrypt(camellia_context, data, data_length, output_length);
+        #ifdef USE_OPENSSL
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_cfb_openssl_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
+        #else
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_cfb_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
+        #endif
     } else if (strcmp(camellia_context->mode, "OFB") == 0) {
-        return camellia_ofb_encrypt(camellia_context, data, data_length, output_length);
-    } else if (strcmp(camellia_context->mode, "ECB") == 0) {
-        return camellia_ecb_encrypt(camellia_context, data, data_length, output_length);
+        #ifdef USE_OPENSSL
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_ofb_openssl_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
+        #else
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_ofb_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
+        #endif
     } else {
         fprintf(stderr, "Error: Unsupported Camellia mode: %s\n", camellia_context->mode);
         return NULL;
     }
 }
 
-unsigned char* camellia_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* camellia_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     camellia_context_t* camellia_context = (camellia_context_t*)context;
@@ -259,7 +289,7 @@ void camellia_custom_cleanup(void* context) {
     camellia_cleanup(context);
 }
 
-unsigned char* camellia_custom_encrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* camellia_custom_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     camellia_context_t* camellia_context = (camellia_context_t*)context;
@@ -286,23 +316,32 @@ unsigned char* camellia_custom_encrypt(void* context, const unsigned char* data,
         return NULL;
     }
     
-    // Custom encrypt based on mode - for now, just use the standard implementations
-    // In a real implementation, you would have custom versions of these functions
+    // Encrypt based on mode using custom implementation
     if (strcmp(camellia_context->mode, "CBC") == 0) {
-        return camellia_cbc_encrypt(camellia_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_cbc_custom_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
     } else if (strcmp(camellia_context->mode, "CFB") == 0) {
-        return camellia_cfb_custom_encrypt(camellia_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_cfb_custom_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
     } else if (strcmp(camellia_context->mode, "OFB") == 0) {
-        return camellia_ofb_custom_encrypt(camellia_context, data, data_length, output_length);
-    } else if (strcmp(camellia_context->mode, "ECB") == 0) {
-        return camellia_ecb_custom_encrypt(camellia_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = camellia_ofb_custom_encrypt(camellia_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
     } else {
         fprintf(stderr, "Error: Unsupported Camellia mode: %s\n", camellia_context->mode);
         return NULL;
     }
 }
 
-unsigned char* camellia_custom_decrypt(void* context, const unsigned char* data, int data_length, const unsigned char* key, int* output_length) {
+unsigned char* camellia_custom_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     camellia_context_t* camellia_context = (camellia_context_t*)context;
@@ -346,9 +385,14 @@ unsigned char* camellia_custom_decrypt(void* context, const unsigned char* data,
 }
 
 unsigned char* camellia_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    // For simplicity, the stream version just calls the regular encrypt function
-    // In a real implementation, this would handle streaming differently
-    return camellia_encrypt(context, data, data_length, key, output_length);
+    // For stream processing, we handle each chunk separately but maintain state across chunks if needed
+    
+    // In a real implementation, this would maintain state across chunks for certain modes (like CBC)
+    size_t data_len = (size_t)data_length;
+    size_t out_len = 0;
+    unsigned char* result = camellia_encrypt(context, data, data_len, key, &out_len);
+    if (output_length) *output_length = (int)out_len;
+    return result;
 }
 
 unsigned char* camellia_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
