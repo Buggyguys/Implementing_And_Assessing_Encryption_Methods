@@ -16,29 +16,29 @@ typedef struct {
     void* openssl_ctx;     // OpenSSL context if using library
 } chacha_context_t;
 
-// Function to register all ChaCha20 implementations
+// function to register all ChaCha20 implementations
 void register_chacha_implementations(implementation_registry_t* registry);
 
-// Function prototypes for ChaCha20 implementations
+// function prototypes for ChaCha20 implementations
 void* chacha_init(void);
 void chacha_cleanup(void* context);
 unsigned char* chacha_generate_key(void* context, int* key_length);
 unsigned char* chacha_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length);
 unsigned char* chacha_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length);
 
-// Stream processing functions
+// stream processing functions
 unsigned char* chacha_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
 unsigned char* chacha_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
 
-// Custom implementation functions
+// custom implementation functions
 void* chacha_custom_init(void);
 void chacha_custom_cleanup(void* context);
 unsigned char* chacha_custom_generate_key(void* context, int* key_length);
 unsigned char* chacha_custom_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length);
 unsigned char* chacha_custom_decrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length);
 
-// Custom stream processing functions
+// custom stream processing functions
 unsigned char* chacha_custom_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
 unsigned char* chacha_custom_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length);
 
-#endif /* CHACHA_IMPLEMENTATION_H */ 
+#endif 
