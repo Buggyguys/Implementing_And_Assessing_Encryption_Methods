@@ -4,54 +4,61 @@
 #include "../include/utils.h"
 #include "../include/crypto_utils.h"
 #include "aes_cfb.h"
+#include "aes_core.h"
 
-#ifdef HAVE_OPENSSL
+#ifdef USE_OPENSSL
 #include <openssl/aes.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
 #endif
 
-// Standard AES-CFB implementation with authentication tag
+// standard 
 unsigned char* aes_cfb_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate standard IV size if not already set
+    // calculate standard IV size 
     if (context->iv_length == 0) {
-        context->iv_length = crypto_get_standard_iv_size("AES", "CFB"); // 16 bytes
+        context->iv_length = crypto_get_standard_iv_size("AES", "CFB"); 
     }
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    // calculate tag size for authentication
+    int tag_size = 16; 
     
-    // Calculate output size (original + IV + tag)
+    // calculate output size 
     int total_length = data_length + context->iv_length + tag_size;
     
-    // Allocate memory for output using secure allocation
+    // allocate memory for output 
     unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
     }
     
-    // Copy IV to the beginning of output
+    // append IV to output
     memcpy(output, context->iv, context->iv_length);
     
-    // CFB encryption - feedback mode
+    // initialize context
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(context->key, context->key_length, &aes_ctx);
+    
+    // encryption
     unsigned char feedback[16] = {0};
-    memcpy(feedback, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    memcpy(feedback, context->iv, 16);
     
     for (int i = 0; i < data_length; i++) {
-        // Encrypt feedback with key to create keystream
-        unsigned char keystream_byte = feedback[i % 16] ^ context->key[i % context->key_length];
+        // encrypt feedback block 
+        unsigned char keystream_block[16];
+        aes_encrypt_block(feedback, keystream_block, &aes_ctx);
         
         // XOR plaintext with keystream
-        output[context->iv_length + i] = data[i] ^ keystream_byte;
+        output[context->iv_length + i] = data[i] ^ keystream_block[0];
         
-        // Update feedback with ciphertext (CFB mode characteristic)
-        feedback[i % 16] = output[context->iv_length + i];
+        // update feedback with ciphertext 
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = output[context->iv_length + i];
     }
     
-    // Generate authentication tag for the ciphertext
+    // generate authentication tag 
     unsigned char* tag = output + context->iv_length + data_length;
     if (!crypto_generate_authentication_tag(tag, tag_size, 
                                           output + context->iv_length, data_length,
@@ -61,7 +68,7 @@ unsigned char* aes_cfb_encrypt(aes_context_t* context, const unsigned char* data
         return NULL;
     }
     
-    // Set the output length
+    // output length
     if (output_length) {
         *output_length = total_length;
     }
@@ -72,16 +79,16 @@ unsigned char* aes_cfb_encrypt(aes_context_t* context, const unsigned char* data
 unsigned char* aes_cfb_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    // calculate tag size for authentication
+    int tag_size = 16; 
     
-    // Ensure we have enough data (at least for the IV and tag)
+    // ensure we have enough data 
     if (data_length <= context->iv_length + tag_size) {
         fprintf(stderr, "Error: Not enough data for CFB decryption\n");
         return NULL;
     }
     
-    // Extract IV from the beginning of data
+    // extract IV 
     if (context->iv) {
         crypto_secure_free(context->iv, context->iv_length);
     }
@@ -92,42 +99,48 @@ unsigned char* aes_cfb_decrypt(aes_context_t* context, const unsigned char* data
     }
     memcpy(context->iv, data, context->iv_length);
     
-    // Calculate output size (data without IV and tag)
+    // calculate output size 
     int plaintext_len = data_length - context->iv_length - tag_size;
     
-    // Verify the authentication tag first
+    // verify the authentication tag 
     const unsigned char* tag = data + context->iv_length + plaintext_len;
     const unsigned char* ciphertext = data + context->iv_length;
     
     if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
                                         context->key, context->key_length)) {
         fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
-        return NULL; // Fail securely on authentication failure
+        return NULL; 
     }
     
-    // Allocate memory for output using secure allocation
+    // allocate memory for output 
     unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
         return NULL;
     }
     
-    // CFB decryption - feedback mode
+    // initialize context
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(context->key, context->key_length, &aes_ctx);
+    
+    // decryption
     unsigned char feedback[16] = {0};
-    memcpy(feedback, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    memcpy(feedback, context->iv, 16);
     
     for (int i = 0; i < plaintext_len; i++) {
-        // Encrypt feedback with key to create keystream
-        unsigned char keystream_byte = feedback[i % 16] ^ context->key[i % context->key_length];
+        // encrypt feedback block 
+        unsigned char keystream_block[16];
+        aes_encrypt_block(feedback, keystream_block, &aes_ctx);
         
         // XOR ciphertext with keystream to get plaintext
-        output[i] = data[context->iv_length + i] ^ keystream_byte;
+        output[i] = data[context->iv_length + i] ^ keystream_block[0];
         
-        // Update feedback with ciphertext (CFB mode characteristic)
-        feedback[i % 16] = data[context->iv_length + i];
+        // update feedback with ciphertext 
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = data[context->iv_length + i];
     }
     
-    // Set the output length
+    // output length
     if (output_length) {
         *output_length = plaintext_len;
     }
@@ -135,74 +148,82 @@ unsigned char* aes_cfb_decrypt(aes_context_t* context, const unsigned char* data
     return output;
 }
 
-// Custom AES-CFB implementation with enhanced feedback mechanism
+// custom 
 unsigned char* aes_cfb_custom_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate standard IV size if not already set
+    // calculate standard IV size if not already set
     if (context->iv_length == 0) {
-        context->iv_length = crypto_get_standard_iv_size("AES", "CFB"); // 16 bytes
+        context->iv_length = crypto_get_standard_iv_size("AES", "CFB"); 
     }
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    // calculate tag size for authentication
+    int tag_size = 16; 
     
-    // Calculate output size (original + IV + tag)
+    // calculate output size 
     int total_length = data_length + context->iv_length + tag_size;
     
-    // Allocate memory for output using secure allocation
+    // allocate memory for output 
     unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
     }
     
-    // Copy IV to the beginning of output
+    // append IV to output
     memcpy(output, context->iv, context->iv_length);
     
-    // Custom CFB encryption with enhanced feedback
-    unsigned char feedback[16] = {0};
-    memcpy(feedback, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
-    
-    // Create a modified key for custom implementation
-    unsigned char* modified_key = (unsigned char*)crypto_secure_alloc(context->key_length);
-    if (!modified_key) {
-        fprintf(stderr, "Error: Could not allocate memory for modified key\n");
+    // create a custom derived key 
+    unsigned char* derived_key = (unsigned char*)crypto_secure_alloc(context->key_length);
+    if (!derived_key) {
+        fprintf(stderr, "Error: Could not allocate memory for derived key\n");
         crypto_secure_free(output, total_length);
         return NULL;
     }
     
-    // Modify key by XORing with a pattern
+    // XOR with pattern and rotate
     for (int i = 0; i < context->key_length; i++) {
-        modified_key[i] = context->key[i] ^ (0xAA + (i % 16));
+        unsigned char rotated = (context->key[i] << 3) | (context->key[i] >> 5);
+        derived_key[i] = rotated ^ (0xAA + (i % 16)) ^ context->iv[i % context->iv_length];
     }
+    
+    // initialize context with derived key
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(derived_key, context->key_length, &aes_ctx);
+    
+    // encryption
+    unsigned char feedback[16] = {0};
+    memcpy(feedback, context->iv, 16);
     
     for (int i = 0; i < data_length; i++) {
-        // Enhanced keystream generation
-        unsigned char keystream_byte = feedback[i % 16] ^ modified_key[i % context->key_length];
-        keystream_byte ^= (i % 256); // Add position-based variation
+        // encrypt feedback block 
+        unsigned char keystream_block[16];
+        aes_encrypt_block(feedback, keystream_block, &aes_ctx);
         
-        // XOR plaintext with keystream
+        // XOR plaintext with keystream 
+        unsigned char keystream_byte = keystream_block[0] ^ keystream_block[i % 16];
         output[context->iv_length + i] = data[i] ^ keystream_byte;
         
-        // Enhanced feedback update (mix ciphertext with previous feedback)
-        feedback[i % 16] = output[context->iv_length + i] ^ (feedback[(i + 1) % 16]);
+        // update feedback with ciphertext 
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = output[context->iv_length + i];
     }
     
-    // Generate authentication tag using modified key
+    // generate authentication tag 
     unsigned char* tag = output + context->iv_length + data_length;
     if (!crypto_generate_authentication_tag(tag, tag_size, 
                                           output + context->iv_length, data_length,
-                                          modified_key, context->key_length)) {
+                                          derived_key, context->key_length)) {
         fprintf(stderr, "Error: Failed to generate authentication tag\n");
-        crypto_secure_free(modified_key, context->key_length);
+        crypto_secure_free(derived_key, context->key_length);
         crypto_secure_free(output, total_length);
         return NULL;
     }
     
-    crypto_secure_free(modified_key, context->key_length);
+    // clean up
+    crypto_secure_free(derived_key, context->key_length);
     
-    // Set the output length
+    // output length
     if (output_length) {
         *output_length = total_length;
     }
@@ -213,16 +234,16 @@ unsigned char* aes_cfb_custom_encrypt(aes_context_t* context, const unsigned cha
 unsigned char* aes_cfb_custom_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    // calculate tag size for authentication
+    int tag_size = 16; 
     
-    // Ensure we have enough data (at least for the IV and tag)
+    // ensure we have enough data 
     if (data_length <= context->iv_length + tag_size) {
         fprintf(stderr, "Error: Not enough data for custom CFB decryption\n");
         return NULL;
     }
     
-    // Extract IV from the beginning of data
+    // extract IV 
     if (context->iv) {
         crypto_secure_free(context->iv, context->iv_length);
     }
@@ -233,59 +254,67 @@ unsigned char* aes_cfb_custom_decrypt(aes_context_t* context, const unsigned cha
     }
     memcpy(context->iv, data, context->iv_length);
     
-    // Calculate output size (data without IV and tag)
+    // calculate output size 
     int plaintext_len = data_length - context->iv_length - tag_size;
     
-    // Create a modified key for custom implementation
-    unsigned char* modified_key = (unsigned char*)crypto_secure_alloc(context->key_length);
-    if (!modified_key) {
-        fprintf(stderr, "Error: Could not allocate memory for modified key\n");
+    // create the same custom derived key 
+    unsigned char* derived_key = (unsigned char*)crypto_secure_alloc(context->key_length);
+    if (!derived_key) {
+        fprintf(stderr, "Error: Could not allocate memory for derived key\n");
         return NULL;
     }
     
-    // Modify key by XORing with a pattern (same as encryption)
+    // XOR with pattern and rotate 
     for (int i = 0; i < context->key_length; i++) {
-        modified_key[i] = context->key[i] ^ (0xAA + (i % 16));
+        unsigned char rotated = (context->key[i] << 3) | (context->key[i] >> 5);
+        derived_key[i] = rotated ^ (0xAA + (i % 16)) ^ context->iv[i % context->iv_length];
     }
     
-    // Verify the authentication tag first
+    // verify the authentication tag 
     const unsigned char* tag = data + context->iv_length + plaintext_len;
     const unsigned char* ciphertext = data + context->iv_length;
     
     if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
-                                        modified_key, context->key_length)) {
+                                        derived_key, context->key_length)) {
         fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
-        crypto_secure_free(modified_key, context->key_length);
+        crypto_secure_free(derived_key, context->key_length);
         return NULL; // Fail securely on authentication failure
     }
     
-    // Allocate memory for output using secure allocation
+    // allocate memory for output 
     unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
-        crypto_secure_free(modified_key, context->key_length);
+        crypto_secure_free(derived_key, context->key_length);
         return NULL;
     }
     
-    // Custom CFB decryption with enhanced feedback
+    // initialize context with derived key
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(derived_key, context->key_length, &aes_ctx);
+    
+    // decryption
     unsigned char feedback[16] = {0};
-    memcpy(feedback, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    memcpy(feedback, context->iv, 16);
     
     for (int i = 0; i < plaintext_len; i++) {
-        // Enhanced keystream generation (same as encryption)
-        unsigned char keystream_byte = feedback[i % 16] ^ modified_key[i % context->key_length];
-        keystream_byte ^= (i % 256); // Add position-based variation
+        // encrypt feedback block 
+        unsigned char keystream_block[16];
+        aes_encrypt_block(feedback, keystream_block, &aes_ctx);
         
-        // XOR ciphertext with keystream to get plaintext
+        // XOR ciphertext with keystream 
+        unsigned char keystream_byte = keystream_block[0] ^ keystream_block[i % 16];
         output[i] = data[context->iv_length + i] ^ keystream_byte;
         
-        // Enhanced feedback update (same as encryption)
-        feedback[i % 16] = data[context->iv_length + i] ^ (feedback[(i + 1) % 16]);
+        // update feedback with ciphertext 
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = data[context->iv_length + i];
     }
     
-    crypto_secure_free(modified_key, context->key_length);
+    // clean up
+    crypto_secure_free(derived_key, context->key_length);
     
-    // Set the output length
+    // output length
     if (output_length) {
         *output_length = plaintext_len;
     }
@@ -293,30 +322,29 @@ unsigned char* aes_cfb_custom_decrypt(aes_context_t* context, const unsigned cha
     return output;
 }
 
-#ifdef HAVE_OPENSSL
-// OpenSSL-based AES-CFB implementation
+#ifdef USE_OPENSSL
 unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate standard IV size if not already set
+    // calculate standard IV size if not already set
     if (context->iv_length == 0) {
-        context->iv_length = AES_BLOCK_SIZE; // 16 bytes
+        context->iv_length = AES_BLOCK_SIZE; 
     }
     
-    // Calculate output size (original + IV)
+    // calculate output size 
     int total_length = data_length + context->iv_length;
     
-    // Allocate memory for output
+    // allocate memory for output
     unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
     }
     
-    // Copy IV to the beginning of output
+    // append IV to output
     memcpy(output, context->iv, context->iv_length);
     
-    // Initialize OpenSSL context
+    // initialize context
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     if (!ctx) {
         fprintf(stderr, "Error: Failed to create OpenSSL context\n");
@@ -324,7 +352,7 @@ unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned ch
         return NULL;
     }
     
-    // Initialize encryption operation
+    // initialize encryption operation
     const EVP_CIPHER* cipher;
     if (context->key_length == 16) {
         cipher = EVP_aes_128_cfb();
@@ -346,7 +374,7 @@ unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned ch
         return NULL;
     }
     
-    // Encrypt data
+    // encrypt data
     int len;
     if (EVP_EncryptUpdate(ctx, output + context->iv_length, &len, data, data_length) != 1) {
         fprintf(stderr, "Error: Failed to encrypt data with OpenSSL CFB\n");
@@ -357,7 +385,7 @@ unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned ch
     
     int ciphertext_len = len;
     
-    // Finalize encryption
+    // finalize encryption
     if (EVP_EncryptFinal_ex(ctx, output + context->iv_length + len, &len) != 1) {
         fprintf(stderr, "Error: Failed to finalize OpenSSL CFB encryption\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -367,10 +395,10 @@ unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned ch
     
     ciphertext_len += len;
     
-    // Clean up
+    // clean up
     EVP_CIPHER_CTX_free(ctx);
     
-    // Set the actual output length
+    // output length
     if (output_length) {
         *output_length = context->iv_length + ciphertext_len;
     }
@@ -378,16 +406,16 @@ unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned ch
     return output;
 }
 
-unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Ensure we have enough data (at least for the IV)
+    // ensure we have enough data 
     if (data_length <= context->iv_length) {
         fprintf(stderr, "Error: Not enough data for OpenSSL CFB decryption\n");
         return NULL;
     }
     
-    // Extract IV from the beginning of data
+    // extract IV 
     if (context->iv) {
         crypto_secure_free(context->iv, context->iv_length);
     }
@@ -398,17 +426,17 @@ unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned ch
     }
     memcpy(context->iv, data, context->iv_length);
     
-    // Calculate output size (data without IV)
+    // calculate output size 
     int ciphertext_len = data_length - context->iv_length;
     
-    // Allocate memory for output
+    // allocate memory for output
     unsigned char* output = (unsigned char*)crypto_secure_alloc(ciphertext_len + AES_BLOCK_SIZE);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
         return NULL;
     }
     
-    // Initialize OpenSSL context
+    // initialize context
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     if (!ctx) {
         fprintf(stderr, "Error: Failed to create OpenSSL context\n");
@@ -416,7 +444,7 @@ unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned ch
         return NULL;
     }
     
-    // Initialize decryption operation
+    // initialize decryption operation
     const EVP_CIPHER* cipher;
     if (context->key_length == 16) {
         cipher = EVP_aes_128_cfb();
@@ -438,7 +466,7 @@ unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned ch
         return NULL;
     }
     
-    // Decrypt data
+    // decrypt data
     int len;
     if (EVP_DecryptUpdate(ctx, output, &len, data + context->iv_length, ciphertext_len) != 1) {
         fprintf(stderr, "Error: Failed to decrypt data with OpenSSL CFB\n");
@@ -449,7 +477,7 @@ unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned ch
     
     int plaintext_len = len;
     
-    // Finalize decryption
+    // finalize decryption
     if (EVP_DecryptFinal_ex(ctx, output + len, &len) != 1) {
         fprintf(stderr, "Error: Failed to finalize OpenSSL CFB decryption\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -459,10 +487,10 @@ unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned ch
     
     plaintext_len += len;
     
-    // Clean up
+    // clean up
     EVP_CIPHER_CTX_free(ctx);
     
-    // Set the output length
+    // output length
     if (output_length) {
         *output_length = plaintext_len;
     }
@@ -470,7 +498,6 @@ unsigned char* aes_cfb_openssl_decrypt(aes_context_t* context, const unsigned ch
     return output;
 }
 #else
-// Stub implementations when OpenSSL is not available
 unsigned char* aes_cfb_openssl_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     fprintf(stderr, "Error: OpenSSL not available - AES-CFB OpenSSL implementation not supported\n");
     return NULL;

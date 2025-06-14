@@ -4,54 +4,62 @@
 #include "../include/utils.h"
 #include "../include/crypto_utils.h"
 #include "aes_ofb.h"
+#include "aes_core.h"
 
-#ifdef HAVE_OPENSSL
+#ifdef USE_OPENSSL
 #include <openssl/aes.h>
 #include <openssl/rand.h>
 #include <openssl/evp.h>
 #endif
 
-// Standard AES-OFB implementation with authentication tag
+// standardimplementation 
 unsigned char* aes_ofb_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate standard IV size if not already set
+    // calculate standard IV size if not already set
     if (context->iv_length == 0) {
         context->iv_length = crypto_get_standard_iv_size("AES", "OFB"); // 16 bytes
     }
     
-    // Calculate tag size for authentication
+    // calculate tag size for authentication
     int tag_size = 16; // 16 bytes (128 bits) for authentication tag
     
-    // Calculate output size (original + IV + tag)
+    // calculate output size (original + IV + tag)
     int total_length = data_length + context->iv_length + tag_size;
     
-    // Allocate memory for output using secure allocation
+    // allocate memory for output using secure allocation
     unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
     }
     
-    // Copy IV to the beginning of output
+    // copy IV to the beginning of output
     memcpy(output, context->iv, context->iv_length);
     
-    // OFB encryption - output feedback mode
+    // initialize AES context
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(context->key, context->key_length, &aes_ctx);
+    
+    // proper AES-OFB encryption - output feedback mode
     unsigned char feedback[16] = {0};
-    memcpy(feedback, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    memcpy(feedback, context->iv, 16);
     
     for (int i = 0; i < data_length; i++) {
-        // Encrypt feedback block with key to create keystream (OFB characteristic)
-        unsigned char keystream_byte = feedback[i % 16] ^ context->key[i % context->key_length];
+        // encrypt feedback block with proper AES to create keystream 
+        unsigned char keystream_block[16];
+        aes_encrypt_block(feedback, keystream_block, &aes_ctx);
         
         // XOR plaintext with keystream
-        output[context->iv_length + i] = data[i] ^ keystream_byte;
+        output[context->iv_length + i] = data[i] ^ keystream_block[0];
         
-        // Update feedback with encrypted feedback (not ciphertext like CFB)
-        feedback[i % 16] = keystream_byte;
+        // update feedback with encrypted feedback 
+        // shift feedback left and add new keystream byte
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = keystream_block[0];
     }
     
-    // Generate authentication tag for the ciphertext
+    // generate authentication tag for the ciphertext
     unsigned char* tag = output + context->iv_length + data_length;
     if (!crypto_generate_authentication_tag(tag, tag_size, 
                                           output + context->iv_length, data_length,
@@ -61,7 +69,7 @@ unsigned char* aes_ofb_encrypt(aes_context_t* context, const unsigned char* data
         return NULL;
     }
     
-    // Set the output length
+    // set the output length
     if (output_length) {
         *output_length = total_length;
     }
@@ -72,10 +80,10 @@ unsigned char* aes_ofb_encrypt(aes_context_t* context, const unsigned char* data
 unsigned char* aes_ofb_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    // calculate tag size for authentication
+    int tag_size = 16; 
     
-    // Ensure we have enough data (at least for the IV and tag)
+    // ensure we have enough data (at least for the IV and tag)
     if (data_length <= context->iv_length + tag_size) {
         fprintf(stderr, "Error: Not enough data for OFB decryption\n");
         return NULL;
@@ -112,19 +120,26 @@ unsigned char* aes_ofb_decrypt(aes_context_t* context, const unsigned char* data
         return NULL;
     }
     
-    // OFB decryption - output feedback mode (same as encryption)
+    // Initialize AES context
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(context->key, context->key_length, &aes_ctx);
+    
+    // Proper AES-OFB decryption - output feedback mode (same as encryption)
     unsigned char feedback[16] = {0};
-    memcpy(feedback, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    memcpy(feedback, context->iv, 16);
     
     for (int i = 0; i < plaintext_len; i++) {
-        // Encrypt feedback block with key to create keystream (same as encryption)
-        unsigned char keystream_byte = feedback[i % 16] ^ context->key[i % context->key_length];
+        // Encrypt feedback block with proper AES to create keystream (same as encryption)
+        unsigned char keystream_block[16];
+        aes_encrypt_block(feedback, keystream_block, &aes_ctx);
         
         // XOR ciphertext with keystream to get plaintext
-        output[i] = data[context->iv_length + i] ^ keystream_byte;
+        output[i] = data[context->iv_length + i] ^ keystream_block[0];
         
         // Update feedback with encrypted feedback (same as encryption)
-        feedback[i % 16] = keystream_byte;
+        // Shift feedback left and add new keystream byte
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = keystream_block[0];
     }
     
     // Set the output length
@@ -160,49 +175,56 @@ unsigned char* aes_ofb_custom_encrypt(aes_context_t* context, const unsigned cha
     // Copy IV to the beginning of output
     memcpy(output, context->iv, context->iv_length);
     
-    // Custom OFB encryption with enhanced output feedback
-    unsigned char feedback[16] = {0};
-    memcpy(feedback, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
-    
-    // Create a modified key for custom implementation
-    unsigned char* modified_key = (unsigned char*)crypto_secure_alloc(context->key_length);
-    if (!modified_key) {
-        fprintf(stderr, "Error: Could not allocate memory for modified key\n");
+    // Create a custom derived key (this is the "custom" part)
+    unsigned char* derived_key = (unsigned char*)crypto_secure_alloc(context->key_length);
+    if (!derived_key) {
+        fprintf(stderr, "Error: Could not allocate memory for derived key\n");
         crypto_secure_free(output, total_length);
         return NULL;
     }
     
-    // Modify key by XORing with a different pattern than CFB
+    // Custom key derivation: different pattern than CFB
     for (int i = 0; i < context->key_length; i++) {
-        modified_key[i] = context->key[i] ^ (0x55 + (i * 3 % 16));
+        unsigned char rotated = (context->key[i] << 1) | (context->key[i] >> 7);
+        derived_key[i] = rotated ^ (0x55 + (i * 3 % 16)) ^ context->iv[i % context->iv_length];
     }
+    
+    // Initialize AES context with derived key
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(derived_key, context->key_length, &aes_ctx);
+    
+    // Proper AES-OFB encryption with custom derived key
+    unsigned char feedback[16] = {0};
+    memcpy(feedback, context->iv, 16);
     
     for (int i = 0; i < data_length; i++) {
-        // Enhanced keystream generation with double encryption
-        unsigned char keystream_byte = feedback[i % 16] ^ modified_key[i % context->key_length];
-        keystream_byte ^= modified_key[(i + 8) % context->key_length]; // Second key mixing
-        keystream_byte ^= (i * 7 % 256); // Add position-based variation
+        // Encrypt feedback block with proper AES to create keystream
+        unsigned char keystream_block[16];
+        aes_encrypt_block(feedback, keystream_block, &aes_ctx);
         
-        // XOR plaintext with keystream
+        // XOR plaintext with keystream (with custom twist - mix multiple keystream bytes)
+        unsigned char keystream_byte = keystream_block[0] ^ keystream_block[(i * 3) % 16];
         output[context->iv_length + i] = data[i] ^ keystream_byte;
         
-        // Enhanced feedback update - mix keystream with rotated feedback
-        unsigned char rotated_feedback = (feedback[i % 16] << 1) | (feedback[i % 16] >> 7);
-        feedback[i % 16] = keystream_byte ^ rotated_feedback;
+        // Update feedback with encrypted feedback (OFB mode characteristic)
+        // Shift feedback left and add new keystream byte
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = keystream_block[0];
     }
     
-    // Generate authentication tag using modified key
+    // Generate authentication tag using derived key
     unsigned char* tag = output + context->iv_length + data_length;
     if (!crypto_generate_authentication_tag(tag, tag_size, 
                                           output + context->iv_length, data_length,
-                                          modified_key, context->key_length)) {
+                                          derived_key, context->key_length)) {
         fprintf(stderr, "Error: Failed to generate authentication tag\n");
-        crypto_secure_free(modified_key, context->key_length);
+        crypto_secure_free(derived_key, context->key_length);
         crypto_secure_free(output, total_length);
         return NULL;
     }
     
-    crypto_secure_free(modified_key, context->key_length);
+    // Clean up
+    crypto_secure_free(derived_key, context->key_length);
     
     // Set the output length
     if (output_length) {
@@ -238,16 +260,17 @@ unsigned char* aes_ofb_custom_decrypt(aes_context_t* context, const unsigned cha
     // Calculate output size (data without IV and tag)
     int plaintext_len = data_length - context->iv_length - tag_size;
     
-    // Create a modified key for custom implementation (same as encryption)
-    unsigned char* modified_key = (unsigned char*)crypto_secure_alloc(context->key_length);
-    if (!modified_key) {
-        fprintf(stderr, "Error: Could not allocate memory for modified key\n");
+    // Create the same custom derived key as in encryption
+    unsigned char* derived_key = (unsigned char*)crypto_secure_alloc(context->key_length);
+    if (!derived_key) {
+        fprintf(stderr, "Error: Could not allocate memory for derived key\n");
         return NULL;
     }
     
-    // Modify key by XORing with a pattern (same as encryption)
+    // Custom key derivation: different pattern than CFB (same as encryption)
     for (int i = 0; i < context->key_length; i++) {
-        modified_key[i] = context->key[i] ^ (0x55 + (i * 3 % 16));
+        unsigned char rotated = (context->key[i] << 1) | (context->key[i] >> 7);
+        derived_key[i] = rotated ^ (0x55 + (i * 3 % 16)) ^ context->iv[i % context->iv_length];
     }
     
     // Verify the authentication tag first
@@ -255,9 +278,9 @@ unsigned char* aes_ofb_custom_decrypt(aes_context_t* context, const unsigned cha
     const unsigned char* ciphertext = data + context->iv_length;
     
     if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
-                                        modified_key, context->key_length)) {
+                                        derived_key, context->key_length)) {
         fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
-        crypto_secure_free(modified_key, context->key_length);
+        crypto_secure_free(derived_key, context->key_length);
         return NULL; // Fail securely on authentication failure
     }
     
@@ -265,29 +288,35 @@ unsigned char* aes_ofb_custom_decrypt(aes_context_t* context, const unsigned cha
     unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
-        crypto_secure_free(modified_key, context->key_length);
+        crypto_secure_free(derived_key, context->key_length);
         return NULL;
     }
     
-    // Custom OFB decryption with enhanced output feedback (same as encryption)
+    // Initialize AES context with derived key
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(derived_key, context->key_length, &aes_ctx);
+    
+    // Proper AES-OFB decryption with custom derived key
     unsigned char feedback[16] = {0};
-    memcpy(feedback, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    memcpy(feedback, context->iv, 16);
     
     for (int i = 0; i < plaintext_len; i++) {
-        // Enhanced keystream generation (same as encryption)
-        unsigned char keystream_byte = feedback[i % 16] ^ modified_key[i % context->key_length];
-        keystream_byte ^= modified_key[(i + 8) % context->key_length]; // Second key mixing
-        keystream_byte ^= (i * 7 % 256); // Add position-based variation
+        // Encrypt feedback block with proper AES to create keystream
+        unsigned char keystream_block[16];
+        aes_encrypt_block(feedback, keystream_block, &aes_ctx);
         
-        // XOR ciphertext with keystream to get plaintext
+        // XOR ciphertext with keystream (with custom twist - mix multiple keystream bytes)
+        unsigned char keystream_byte = keystream_block[0] ^ keystream_block[(i * 3) % 16];
         output[i] = data[context->iv_length + i] ^ keystream_byte;
         
-        // Enhanced feedback update (same as encryption)
-        unsigned char rotated_feedback = (feedback[i % 16] << 1) | (feedback[i % 16] >> 7);
-        feedback[i % 16] = keystream_byte ^ rotated_feedback;
+        // Update feedback with encrypted feedback (OFB mode characteristic)
+        // Shift feedback left and add new keystream byte
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = keystream_block[0];
     }
     
-    crypto_secure_free(modified_key, context->key_length);
+    // Clean up
+    crypto_secure_free(derived_key, context->key_length);
     
     // Set the output length
     if (output_length) {
@@ -297,7 +326,7 @@ unsigned char* aes_ofb_custom_decrypt(aes_context_t* context, const unsigned cha
     return output;
 }
 
-#ifdef HAVE_OPENSSL
+#ifdef USE_OPENSSL
 // OpenSSL-based AES-OFB implementation
 unsigned char* aes_ofb_openssl_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
@@ -382,7 +411,7 @@ unsigned char* aes_ofb_openssl_encrypt(aes_context_t* context, const unsigned ch
     return output;
 }
 
-unsigned char* aes_ofb_openssl_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+unsigned char* aes_ofb_openssl_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Ensure we have enough data (at least for the IV)

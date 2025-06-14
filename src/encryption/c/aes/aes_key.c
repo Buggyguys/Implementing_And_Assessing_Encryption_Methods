@@ -10,23 +10,23 @@ unsigned char* aes_generate_key(void* context, int* key_length) {
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Free old key if it exists
+    // free old key if it exists
     if (aes_context->key) {
         crypto_secure_free(aes_context->key, aes_context->key_length);
         aes_context->key = NULL;
     }
     
-    // Calculate key length in bytes
+    // calculate key length in bytes
     aes_context->key_length = aes_context->key_size / 8;
     
-    // Allocate memory for key using secure allocation
+    // allocate memory for key using secure allocation
     aes_context->key = (unsigned char*)crypto_secure_alloc(aes_context->key_length);
     if (!aes_context->key) {
         fprintf(stderr, "Error: Could not allocate memory for AES key\n");
         return NULL;
     }
     
-    // Generate random key using cryptographically secure function
+    // generate random key using cryptographically secure function
     if (!crypto_generate_key(aes_context->key, aes_context->key_length)) {
         fprintf(stderr, "Error: Failed to generate AES key\n");
         crypto_secure_free(aes_context->key, aes_context->key_length);
@@ -34,11 +34,11 @@ unsigned char* aes_generate_key(void* context, int* key_length) {
         return NULL;
     }
     
-    // Generate IV for modes that require it using standard sizes
+    // generate IV for modes that require it using standard sizes
     if (aes_context->mode[0] != '\0') {
         aes_context->iv_length = crypto_get_standard_iv_size("AES", aes_context->mode);
     } else {
-        // Default to GCM
+        // default to GCM
         aes_context->iv_length = 12;
     }
     
@@ -70,7 +70,7 @@ unsigned char* aes_generate_key(void* context, int* key_length) {
         *key_length = aes_context->key_length;
     }
     
-    // Return a copy of the key using secure allocation
+    // return a copy of the key using secure allocation
     unsigned char* key_copy = (unsigned char*)crypto_secure_alloc(aes_context->key_length);
     if (!key_copy) {
         fprintf(stderr, "Error: Could not allocate memory for AES key copy\n");
@@ -82,21 +82,17 @@ unsigned char* aes_generate_key(void* context, int* key_length) {
 }
 
 unsigned char* aes_custom_generate_key(void* context, int* key_length) {
-    // For now, the custom key generator does the same as the standard one
-    // In a real-world implementation, you might want to use different algorithms
     return aes_generate_key(context, key_length);
 }
 
-// Standard AES key generation functions for specific key sizes
+// standard AES key generation functions for specific key sizes
 unsigned char* aes_generate_key_128(void* context, int* key_length) {
     if (!context) return NULL;
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 128 bits
+    // set the key size to 128 bits
     aes_context->key_size = 128;
-    
-    // Call the general key generation function
     return aes_generate_key(context, key_length);
 }
 
@@ -105,10 +101,8 @@ unsigned char* aes_generate_key_192(void* context, int* key_length) {
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 192 bits
+    // set the key size to 192 bits
     aes_context->key_size = 192;
-    
-    // Call the general key generation function
     return aes_generate_key(context, key_length);
 }
 
@@ -117,23 +111,19 @@ unsigned char* aes_generate_key_256(void* context, int* key_length) {
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 256 bits
+    // set the key size to 256 bits
     aes_context->key_size = 256;
-    
-    // Call the general key generation function
     return aes_generate_key(context, key_length);
 }
 
-// Custom AES key generation functions for specific key sizes
+// custom AES key generation functions for specific key sizes
 unsigned char* aes_custom_generate_key_128(void* context, int* key_length) {
     if (!context) return NULL;
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 128 bits
+    // set the key size to 128 bits
     aes_context->key_size = 128;
-    
-    // Call the custom key generation function
     return aes_custom_generate_key(context, key_length);
 }
 
@@ -142,10 +132,8 @@ unsigned char* aes_custom_generate_key_192(void* context, int* key_length) {
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 192 bits
+    // set the key size to 192 bits
     aes_context->key_size = 192;
-    
-    // Call the custom key generation function
     return aes_custom_generate_key(context, key_length);
 }
 
@@ -154,26 +142,25 @@ unsigned char* aes_custom_generate_key_256(void* context, int* key_length) {
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 256 bits
+    // set the key size to 256 bits
     aes_context->key_size = 256;
-    
-    // Call the custom key generation function
     return aes_custom_generate_key(context, key_length);
 }
 
 #ifdef USE_OPENSSL
 #include <openssl/rand.h>
 
-// OpenSSL key generation functions for specific key sizes
+// forward declaration
+unsigned char* aes_openssl_generate_key(void* context, int* key_length);
+
+// openssl key generation functions for specific key sizes
 unsigned char* aes_openssl_generate_key_128(void* context, int* key_length) {
     if (!context) return NULL;
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 128 bits
+    // set the key size to 128 bits
     aes_context->key_size = 128;
-    
-    // Call the OpenSSL key generation function
     return aes_openssl_generate_key(context, key_length);
 }
 
@@ -182,10 +169,8 @@ unsigned char* aes_openssl_generate_key_192(void* context, int* key_length) {
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 192 bits
+    // set the key size to 192 bits
     aes_context->key_size = 192;
-    
-    // Call the OpenSSL key generation function
     return aes_openssl_generate_key(context, key_length);
 }
 
@@ -194,36 +179,34 @@ unsigned char* aes_openssl_generate_key_256(void* context, int* key_length) {
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Set the key size to 256 bits
+    // set the key size to 256 bits
     aes_context->key_size = 256;
-    
-    // Call the OpenSSL key generation function
     return aes_openssl_generate_key(context, key_length);
 }
 
-// Main OpenSSL key generation function
+// main OpenSSL key generation function
 unsigned char* aes_openssl_generate_key(void* context, int* key_length) {
     if (!context) return NULL;
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // Free old key if it exists
+    // free old key if it exists
     if (aes_context->key) {
         free(aes_context->key);
         aes_context->key = NULL;
     }
     
-    // Calculate key length in bytes
+    // calculate key length in bytes
     aes_context->key_length = aes_context->key_size / 8;
     
-    // Allocate memory for key
+    // allocate memory for key
     aes_context->key = (unsigned char*)malloc(aes_context->key_length);
     if (!aes_context->key) {
         fprintf(stderr, "Error: Could not allocate memory for AES key\n");
         return NULL;
     }
     
-    // Generate random key using OpenSSL
+    // generate random key using OpenSSL
     if (RAND_bytes(aes_context->key, aes_context->key_length) != 1) {
         fprintf(stderr, "Error: OpenSSL RAND_bytes failed\n");
         free(aes_context->key);
@@ -231,7 +214,7 @@ unsigned char* aes_openssl_generate_key(void* context, int* key_length) {
         return NULL;
     }
     
-    // Generate IV for modes that require it
+    // generate IV for modes that require it
     if (strcmp(aes_context->mode, "GCM") == 0) {
         aes_context->iv_length = 12; // 96 bits for GCM
     } else if (strcmp(aes_context->mode, "CBC") == 0 || 
@@ -254,7 +237,7 @@ unsigned char* aes_openssl_generate_key(void* context, int* key_length) {
             return NULL;
         }
         
-        // Generate random IV using OpenSSL
+        // generate random IV using OpenSSL
         if (RAND_bytes(aes_context->iv, aes_context->iv_length) != 1) {
             fprintf(stderr, "Error: OpenSSL RAND_bytes failed for IV\n");
             free(aes_context->key);
@@ -269,7 +252,7 @@ unsigned char* aes_openssl_generate_key(void* context, int* key_length) {
         *key_length = aes_context->key_length;
     }
     
-    // Return a copy of the key
+    // return a copy of the key
     unsigned char* key_copy = (unsigned char*)malloc(aes_context->key_length);
     if (!key_copy) {
         fprintf(stderr, "Error: Could not allocate memory for AES key copy\n");

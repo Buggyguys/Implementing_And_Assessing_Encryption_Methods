@@ -4,58 +4,87 @@
 #include "../include/utils.h"
 #include "../include/crypto_utils.h"
 #include "aes_cbc.h"
+#include "aes_core.h"
 
-// Standard AES-CBC implementation with authentication tag
+// standard AES-CBC 
 unsigned char* aes_cbc_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For testing, we'll implement a simple CBC mode with authentication
-    
-    // Calculate standard IV size if not already set
+    // calculate IV size
     if (context->iv_length == 0) {
         context->iv_length = crypto_get_standard_iv_size("AES", "CBC"); // 16 bytes
     }
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    // calculate tag size 
+    int tag_size = 16; 
     
-    // Calculate output size (original + IV + tag)
-    int total_length = data_length + context->iv_length + tag_size;
+    // PKCS#7 padding
+    int padding_len = 16 - (data_length % 16);
+    int padded_len = data_length + padding_len;
     
-    // Allocate memory for output using secure allocation
+    // calculate output size (padded data + IV + tag)
+    int total_length = padded_len + context->iv_length + tag_size;
+    
+    // allocate memory 
     unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
     }
     
-    // Copy IV to the beginning of output
+    // append IV output
     memcpy(output, context->iv, context->iv_length);
     
-    // Simple CBC encryption with key and IV
-    unsigned char prev_block[16] = {0};
-    memcpy(prev_block, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
-    
-    for (int i = 0; i < data_length; i++) {
-        // XOR with previous cipher block (CBC mode)
-        unsigned char xored = data[i] ^ prev_block[i % 16];
-        // Encrypt with key
-        output[context->iv_length + i] = xored ^ context->key[i % context->key_length];
-        // Update previous block for next iteration
-        prev_block[i % 16] = output[context->iv_length + i];
-    }
-    
-    // Generate authentication tag for the ciphertext
-    unsigned char* tag = output + context->iv_length + data_length;
-    if (!crypto_generate_authentication_tag(tag, tag_size, 
-                                          output + context->iv_length, data_length,
-                                          context->key, context->key_length)) {
-        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+    // create padded data
+    unsigned char* padded_data = (unsigned char*)crypto_secure_alloc(padded_len);
+    if (!padded_data) {
+        fprintf(stderr, "Error: Could not allocate memory for padded data\n");
         crypto_secure_free(output, total_length);
         return NULL;
     }
     
-    // Set the output length
+    memcpy(padded_data, data, data_length);
+    // apply PKCS#7 padding
+    for (int i = 0; i < padding_len; i++) {
+        padded_data[data_length + i] = padding_len;
+    }
+    
+    // initialize context
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(context->key, context->key_length, &aes_ctx);
+    
+    unsigned char prev_block[16];
+    memcpy(prev_block, context->iv, 16);
+    
+    for (int i = 0; i < padded_len; i += 16) {
+        unsigned char block[16];
+        
+        // XOR with previous block (CBC mode)
+        for (int j = 0; j < 16; j++) {
+            block[j] = padded_data[i + j] ^ prev_block[j];
+        }
+        
+        aes_encrypt_block(block, output + context->iv_length + i, &aes_ctx);
+        
+        // save block for next iteration
+        memcpy(prev_block, output + context->iv_length + i, 16);
+    }
+    
+    // generate authentication tag for the ciphertext
+    unsigned char* tag = output + context->iv_length + padded_len;
+    if (!crypto_generate_authentication_tag(tag, tag_size, 
+                                          output + context->iv_length, padded_len,
+                                          context->key, context->key_length)) {
+        fprintf(stderr, "Error: Failed to generate authentication tag\n");
+        crypto_secure_free(padded_data, padded_len);
+        crypto_secure_free(output, total_length);
+        return NULL;
+    }
+    
+    // clean up
+    crypto_secure_free(padded_data, padded_len);
+    
+    // output length
     if (output_length) {
         *output_length = total_length;
     }
@@ -66,18 +95,16 @@ unsigned char* aes_cbc_encrypt(aes_context_t* context, const unsigned char* data
 unsigned char* aes_cbc_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // For testing, we'll implement a simple CBC decryption with authentication
+    // calculate tag size for authentication
+    int tag_size = 16; 
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
-    
-    // Ensure we have enough data (at least for the IV and tag)
+    // ensure we have enough data 
     if (data_length <= context->iv_length + tag_size) {
         fprintf(stderr, "Error: Not enough data for CBC decryption\n");
         return NULL;
     }
     
-    // Extract IV from the beginning of data
+    // extract IV 
     if (context->iv) {
         crypto_secure_free(context->iv, context->iv_length);
     }
@@ -88,40 +115,80 @@ unsigned char* aes_cbc_decrypt(aes_context_t* context, const unsigned char* data
     }
     memcpy(context->iv, data, context->iv_length);
     
-    // Calculate output size (data without IV and tag)
-    int plaintext_len = data_length - context->iv_length - tag_size;
+    // calculate ciphertext size
+    int ciphertext_len = data_length - context->iv_length - tag_size;
     
-    // Verify the authentication tag first
-    const unsigned char* tag = data + context->iv_length + plaintext_len;
+    // verify the authentication tag 
+    const unsigned char* tag = data + context->iv_length + ciphertext_len;
     const unsigned char* ciphertext = data + context->iv_length;
     
-    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
+    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, ciphertext_len, 
                                         context->key, context->key_length)) {
         fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
-        return NULL; // Fail securely on authentication failure
+        return NULL; 
     }
     
-    // Allocate memory for output using secure allocation
-    unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
-    if (!output) {
+    // allocate memory for decrypted data 
+    unsigned char* decrypted = (unsigned char*)crypto_secure_alloc(ciphertext_len);
+    if (!decrypted) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
         return NULL;
     }
     
-    // Simple CBC decryption with key and IV
-    unsigned char prev_block[16] = {0};
-    memcpy(prev_block, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    // initialize context
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(context->key, context->key_length, &aes_ctx);
     
-    for (int i = 0; i < plaintext_len; i++) {
-        // Decrypt with key
-        unsigned char decrypted = data[context->iv_length + i] ^ context->key[i % context->key_length];
-        // XOR with previous cipher block (CBC mode)
-        output[i] = decrypted ^ prev_block[i % 16];
-        // Update previous block for next iteration
-        prev_block[i % 16] = data[context->iv_length + i];
+    // decryption
+    unsigned char prev_block[16];
+    memcpy(prev_block, context->iv, 16);
+    
+    for (int i = 0; i < ciphertext_len; i += 16) {
+        unsigned char block[16];
+        
+        // decrypt block 
+        aes_decrypt_block(ciphertext + i, block, &aes_ctx);
+        
+        // XOR with previous block 
+        for (int j = 0; j < 16; j++) {
+            decrypted[i + j] = block[j] ^ prev_block[j];
+        }
+        
+        // save block for next iteration
+        memcpy(prev_block, ciphertext + i, 16);
     }
     
-    // Set the output length
+    // remove PKCS#7 padding
+    int padding_len = decrypted[ciphertext_len - 1];
+    if (padding_len < 1 || padding_len > 16) {
+        fprintf(stderr, "Error: Invalid padding in decrypted data\n");
+        crypto_secure_free(decrypted, ciphertext_len);
+        return NULL;
+    }
+    
+    // verify padding
+    for (int i = 0; i < padding_len; i++) {
+        if (decrypted[ciphertext_len - 1 - i] != padding_len) {
+            fprintf(stderr, "Error: Invalid padding in decrypted data\n");
+            crypto_secure_free(decrypted, ciphertext_len);
+            return NULL;
+        }
+    }
+    
+    int plaintext_len = ciphertext_len - padding_len;
+    
+    // allocate final output
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
+    if (!output) {
+        fprintf(stderr, "Error: Could not allocate memory for final output\n");
+        crypto_secure_free(decrypted, ciphertext_len);
+        return NULL;
+    }
+    
+    memcpy(output, decrypted, plaintext_len);
+    crypto_secure_free(decrypted, ciphertext_len);
+    
+    // output length
     if (output_length) {
         *output_length = plaintext_len;
     }
@@ -129,81 +196,106 @@ unsigned char* aes_cbc_decrypt(aes_context_t* context, const unsigned char* data
     return output;
 }
 
-// Custom AES-CBC implementation with authentication
+// custom 
 unsigned char* aes_cbc_custom_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
-    
-    // For testing, we'll implement a custom CBC mode with a different approach
-    
-    // Calculate standard IV size if not already set
+    // calculate standard IV size 
     if (context->iv_length == 0) {
-        context->iv_length = crypto_get_standard_iv_size("AES", "CBC"); // 16 bytes
+        context->iv_length = crypto_get_standard_iv_size("AES", "CBC"); 
     }
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    // calculate tag size for authentication
+    int tag_size = 16; 
     
-    // Calculate output size (original + IV + tag)
+    // calculate output size (original + IV + tag)
     int total_length = data_length + context->iv_length + tag_size;
     
-    // Allocate memory for output using secure allocation
+    // allocate memory
     unsigned char* output = (unsigned char*)crypto_secure_alloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
     }
     
-    // Copy IV to the beginning of output
+    // append IV to output
     memcpy(output, context->iv, context->iv_length);
     
-    // Custom CBC encryption with rotated key
-    unsigned char prev_block[16] = {0};
-    memcpy(prev_block, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    // PKCS#7 padding 
+    int padding_len = 16 - (data_length % 16);
+    int padded_len = data_length + padding_len;
     
-    // Create a rotated key for a different pattern using secure allocation
-    unsigned char* rotated_key = (unsigned char*)crypto_secure_alloc(context->key_length);
-    if (!rotated_key) {
-        fprintf(stderr, "Error: Could not allocate memory for rotated key\n");
+    // create padded data
+    unsigned char* padded_data = (unsigned char*)crypto_secure_alloc(padded_len);
+    if (!padded_data) {
+        fprintf(stderr, "Error: Could not allocate memory for padded data\n");
         crypto_secure_free(output, total_length);
         return NULL;
     }
     
-    memcpy(rotated_key, context->key, context->key_length);
-    
-    // Rotate key by 2 bytes
-    if (context->key_length > 2) {
-        unsigned char temp[2];
-        memcpy(temp, rotated_key, 2);
-        memmove(rotated_key, rotated_key + 2, context->key_length - 2);
-        memcpy(rotated_key + context->key_length - 2, temp, 2);
+    memcpy(padded_data, data, data_length);
+    // apply PKCS#7 padding
+    for (int i = 0; i < padding_len; i++) {
+        padded_data[data_length + i] = padding_len;
     }
     
-    for (int i = 0; i < data_length; i++) {
-        // First XOR with previous block (CBC mode)
-        unsigned char block_xor = data[i] ^ prev_block[i % 16];
-        // Second XOR with rotated key
-        output[context->iv_length + i] = block_xor ^ rotated_key[i % context->key_length];
-        // Update previous block with current output
-        prev_block[i % 16] = output[context->iv_length + i];
-        // Extra XOR with i for more complexity
-        output[context->iv_length + i] ^= (i % 256);
+    // create a custom derived key 
+    unsigned char* derived_key = (unsigned char*)crypto_secure_alloc(context->key_length);
+    if (!derived_key) {
+        fprintf(stderr, "Error: Could not allocate memory for derived key\n");
+        crypto_secure_free(padded_data, padded_len);
+        crypto_secure_free(output, total_length);
+        return NULL;
     }
     
-    // Generate authentication tag using rotated key
-    unsigned char* tag = output + context->iv_length + data_length;
+    // rotate and XOR with IV
+    for (int i = 0; i < context->key_length; i++) {
+        unsigned char rotated = (context->key[i] << 2) | (context->key[i] >> 6);
+        derived_key[i] = rotated ^ context->iv[i % context->iv_length];
+    }
+    
+    // initialize context with derived key
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(derived_key, context->key_length, &aes_ctx);
+    
+    // encryption
+    unsigned char prev_block[16];
+    memcpy(prev_block, context->iv, 16);
+    
+    for (int i = 0; i < padded_len; i += 16) {
+        unsigned char block[16];
+        
+        // XOR with previous block 
+        for (int j = 0; j < 16; j++) {
+            block[j] = padded_data[i + j] ^ prev_block[j];
+        }
+        
+        // encrypt block 
+        aes_encrypt_block(block, output + context->iv_length + i, &aes_ctx);
+        
+        // save block for next iteration
+        memcpy(prev_block, output + context->iv_length + i, 16);
+    }
+    
+    // update total_length for padded data
+    total_length = padded_len + context->iv_length + tag_size;
+    
+    // generate authentication tag 
+    unsigned char* tag = output + context->iv_length + padded_len;
     if (!crypto_generate_authentication_tag(tag, tag_size, 
-                                          output + context->iv_length, data_length,
-                                          rotated_key, context->key_length)) {
+                                          output + context->iv_length, padded_len,
+                                          derived_key, context->key_length)) {
         fprintf(stderr, "Error: Failed to generate authentication tag\n");
-        crypto_secure_free(rotated_key, context->key_length);
+        crypto_secure_free(derived_key, context->key_length);
+        crypto_secure_free(padded_data, padded_len);
         crypto_secure_free(output, total_length);
         return NULL;
     }
     
-    // Securely free rotated key
-    crypto_secure_free(rotated_key, context->key_length);
+    // clean up
+    crypto_secure_free(derived_key, context->key_length);
+    crypto_secure_free(padded_data, padded_len);
     
-    // Set the output length
+    // output length
     if (output_length) {
         *output_length = total_length;
     }
@@ -214,16 +306,16 @@ unsigned char* aes_cbc_custom_encrypt(aes_context_t* context, const unsigned cha
 unsigned char* aes_cbc_custom_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
-    // Calculate tag size for authentication
-    int tag_size = 16; // 16 bytes (128 bits) for authentication tag
+    // calculate tag size for authentication
+    int tag_size = 16; 
     
-    // Ensure we have enough data (at least for the IV and tag)
+    // ensure we have enough data 
     if (data_length <= context->iv_length + tag_size) {
         fprintf(stderr, "Error: Not enough data for CBC decryption\n");
         return NULL;
     }
     
-    // Extract IV from the beginning of data
+    // extract IV 
     if (context->iv) {
         crypto_secure_free(context->iv, context->iv_length);
     }
@@ -234,64 +326,101 @@ unsigned char* aes_cbc_custom_decrypt(aes_context_t* context, const unsigned cha
     }
     memcpy(context->iv, data, context->iv_length);
     
-    // Calculate output size (data without IV and tag)
-    int plaintext_len = data_length - context->iv_length - tag_size;
+    // calculate ciphertext size 
+    int ciphertext_len = data_length - context->iv_length - tag_size;
     
-    // Create a rotated key for a different pattern (same as in encryption)
-    unsigned char* rotated_key = (unsigned char*)crypto_secure_alloc(context->key_length);
-    if (!rotated_key) {
-        fprintf(stderr, "Error: Could not allocate memory for rotated key\n");
+    // create the same custom derived key 
+    unsigned char* derived_key = (unsigned char*)crypto_secure_alloc(context->key_length);
+    if (!derived_key) {
+        fprintf(stderr, "Error: Could not allocate memory for derived key\n");
         return NULL;
     }
     
-    memcpy(rotated_key, context->key, context->key_length);
-    
-    // Rotate key by 2 bytes
-    if (context->key_length > 2) {
-        unsigned char temp[2];
-        memcpy(temp, rotated_key, 2);
-        memmove(rotated_key, rotated_key + 2, context->key_length - 2);
-        memcpy(rotated_key + context->key_length - 2, temp, 2);
+    // rotate and XOR with IV 
+    for (int i = 0; i < context->key_length; i++) {
+        unsigned char rotated = (context->key[i] << 2) | (context->key[i] >> 6);
+        derived_key[i] = rotated ^ context->iv[i % context->iv_length];
     }
     
-    // Verify the authentication tag first
-    const unsigned char* tag = data + context->iv_length + plaintext_len;
+    // verify the authentication tag 
+    const unsigned char* tag = data + context->iv_length + ciphertext_len;
     const unsigned char* ciphertext = data + context->iv_length;
     
-    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, plaintext_len, 
-                                        rotated_key, context->key_length)) {
+    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, ciphertext_len, 
+                                        derived_key, context->key_length)) {
         fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
-        crypto_secure_free(rotated_key, context->key_length);
-        return NULL; // Fail securely on authentication failure
+        crypto_secure_free(derived_key, context->key_length);
+        return NULL; 
     }
     
-    // Allocate memory for output using secure allocation
-    unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
-    if (!output) {
+    // allocate memory for decrypted data 
+    unsigned char* decrypted = (unsigned char*)crypto_secure_alloc(ciphertext_len);
+    if (!decrypted) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
-        crypto_secure_free(rotated_key, context->key_length);
+        crypto_secure_free(derived_key, context->key_length);
         return NULL;
     }
     
-    // Custom CBC decryption - reverse the custom encryption
-    unsigned char prev_block[16] = {0};
-    memcpy(prev_block, context->iv, context->iv_length > 16 ? 16 : context->iv_length);
+    // initialize context with derived key
+    aes_core_context_t aes_ctx;
+    aes_key_expansion(derived_key, context->key_length, &aes_ctx);
     
-    for (int i = 0; i < plaintext_len; i++) {
-        // Un-XOR with i
-        unsigned char block = data[context->iv_length + i] ^ (i % 256);
-        // Un-XOR with rotated key
-        unsigned char decrypted = block ^ rotated_key[i % context->key_length];
-        // Un-XOR with previous cipher block (CBC mode)
-        output[i] = decrypted ^ prev_block[i % 16];
-        // Update previous block for next iteration
-        prev_block[i % 16] = block;
+    // decryption
+    unsigned char prev_block[16];
+    memcpy(prev_block, context->iv, 16);
+    
+    for (int i = 0; i < ciphertext_len; i += 16) {
+        unsigned char block[16];
+        
+        // decrypt block 
+        aes_decrypt_block(ciphertext + i, block, &aes_ctx);
+        
+        // XOR with previous block 
+        for (int j = 0; j < 16; j++) {
+            decrypted[i + j] = block[j] ^ prev_block[j];
+        }
+        
+        // save block for next iteration
+        memcpy(prev_block, ciphertext + i, 16);
     }
     
-    // Securely free rotated key
-    crypto_secure_free(rotated_key, context->key_length);
+    // remove PKCS#7 padding
+    int padding_len = decrypted[ciphertext_len - 1];
+    if (padding_len < 1 || padding_len > 16) {
+        fprintf(stderr, "Error: Invalid padding in decrypted data\n");
+        crypto_secure_free(derived_key, context->key_length);
+        crypto_secure_free(decrypted, ciphertext_len);
+        return NULL;
+    }
     
-    // Set the output length
+    // verify padding
+    for (int i = 0; i < padding_len; i++) {
+        if (decrypted[ciphertext_len - 1 - i] != padding_len) {
+            fprintf(stderr, "Error: Invalid padding in decrypted data\n");
+            crypto_secure_free(derived_key, context->key_length);
+            crypto_secure_free(decrypted, ciphertext_len);
+            return NULL;
+        }
+    }
+    
+    int plaintext_len = ciphertext_len - padding_len;
+    
+    // allocate final output
+    unsigned char* output = (unsigned char*)crypto_secure_alloc(plaintext_len);
+    if (!output) {
+        fprintf(stderr, "Error: Could not allocate memory for final output\n");
+        crypto_secure_free(derived_key, context->key_length);
+        crypto_secure_free(decrypted, ciphertext_len);
+        return NULL;
+    }
+    
+    memcpy(output, decrypted, plaintext_len);
+    
+    // clean up
+    crypto_secure_free(derived_key, context->key_length);
+    crypto_secure_free(decrypted, ciphertext_len);
+    
+    // output length
     if (output_length) {
         *output_length = plaintext_len;
     }
@@ -303,38 +432,37 @@ unsigned char* aes_cbc_custom_decrypt(aes_context_t* context, const unsigned cha
 #include <openssl/evp.h>
 #include <openssl/err.h>
 
-// OpenSSL AES-CBC implementation
+// openssl 
 unsigned char* aes_cbc_openssl_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     EVP_CIPHER_CTX *ctx = NULL;
     unsigned char *output = NULL;
     int len = 0, ciphertext_len = 0;
-    int block_size = 16; // AES block size is 16 bytes
+    int block_size = 16; 
     
-    // Calculate output size (original + IV + padding)
-    // In CBC mode, the output is padded to a multiple of the block size
+    // calculate output size 
     int padding_len = block_size - (data_length % block_size);
     int total_length = data_length + padding_len + context->iv_length;
     
-    // Allocate memory for output
+    // allocate memory for output
     output = (unsigned char*)malloc(total_length);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for encrypted data\n");
         return NULL;
     }
     
-    // Copy IV to the beginning of output
+    // append IV to output
     memcpy(output, context->iv, context->iv_length);
     
-    // Create and initialize the context
+    // create and initialize context
     if(!(ctx = EVP_CIPHER_CTX_new())) {
         fprintf(stderr, "Error: Could not create OpenSSL cipher context\n");
         free(output);
         return NULL;
     }
     
-    // Select the appropriate cipher based on key size
+    // select the appropriate cipher based on key size
     const EVP_CIPHER *cipher = NULL;
     switch (context->key_size) {
         case 128:
@@ -353,7 +481,7 @@ unsigned char* aes_cbc_openssl_encrypt(aes_context_t* context, const unsigned ch
             return NULL;
     }
     
-    // Initialize the encryption operation
+    // initialize the encryption operation
     if (1 != EVP_EncryptInit_ex(ctx, cipher, NULL, context->key, context->iv)) {
         fprintf(stderr, "Error: Could not initialize encryption\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -361,7 +489,7 @@ unsigned char* aes_cbc_openssl_encrypt(aes_context_t* context, const unsigned ch
         return NULL;
     }
     
-    // Encrypt the plaintext
+    // encrypt
     if (1 != EVP_EncryptUpdate(ctx, output + context->iv_length, &len, data, data_length)) {
         fprintf(stderr, "Error: Could not encrypt data\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -370,7 +498,7 @@ unsigned char* aes_cbc_openssl_encrypt(aes_context_t* context, const unsigned ch
     }
     ciphertext_len = len;
     
-    // Finalize the encryption (add padding)
+    // finalize the encryption 
     if (1 != EVP_EncryptFinal_ex(ctx, output + context->iv_length + len, &len)) {
         fprintf(stderr, "Error: Could not finalize encryption\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -379,10 +507,10 @@ unsigned char* aes_cbc_openssl_encrypt(aes_context_t* context, const unsigned ch
     }
     ciphertext_len += len;
     
-    // Clean up
+    // clean up
     EVP_CIPHER_CTX_free(ctx);
     
-    // Set the output length
+    // output length
     if (output_length) {
         *output_length = context->iv_length + ciphertext_len;
     }
@@ -397,13 +525,13 @@ unsigned char* aes_cbc_openssl_decrypt(aes_context_t* context, const unsigned ch
     unsigned char *output = NULL;
     int len = 0, plaintext_len = 0;
     
-    // Ensure we have enough data (at least for the IV)
+    // ensure we have enough data 
     if (data_length <= context->iv_length) {
         fprintf(stderr, "Error: Not enough data for CBC decryption\n");
         return NULL;
     }
     
-    // Extract IV from the beginning of data
+    // extract IV 
     if (context->iv) {
         free(context->iv);
     }
@@ -414,24 +542,24 @@ unsigned char* aes_cbc_openssl_decrypt(aes_context_t* context, const unsigned ch
     }
     memcpy(context->iv, data, context->iv_length);
     
-    // Calculate ciphertext length (data without IV)
+    // calculate ciphertext length 
     int ciphertext_len = data_length - context->iv_length;
     
-    // Allocate memory for output (maximum possible size)
+    // allocate memory for output 
     output = (unsigned char*)malloc(ciphertext_len);
     if (!output) {
         fprintf(stderr, "Error: Could not allocate memory for decrypted data\n");
         return NULL;
     }
     
-    // Create and initialize the context
+    // create and initialize context
     if(!(ctx = EVP_CIPHER_CTX_new())) {
         fprintf(stderr, "Error: Could not create OpenSSL cipher context\n");
         free(output);
         return NULL;
     }
     
-    // Select the appropriate cipher based on key size
+    // select key size
     const EVP_CIPHER *cipher = NULL;
     switch (context->key_size) {
         case 128:
@@ -450,7 +578,7 @@ unsigned char* aes_cbc_openssl_decrypt(aes_context_t* context, const unsigned ch
             return NULL;
     }
     
-    // Initialize the decryption operation
+    // initialize the decryption operation
     if (1 != EVP_DecryptInit_ex(ctx, cipher, NULL, context->key, context->iv)) {
         fprintf(stderr, "Error: Could not initialize decryption\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -458,7 +586,7 @@ unsigned char* aes_cbc_openssl_decrypt(aes_context_t* context, const unsigned ch
         return NULL;
     }
     
-    // Decrypt the ciphertext
+    // decrypt
     if (1 != EVP_DecryptUpdate(ctx, output, &len, data + context->iv_length, ciphertext_len)) {
         fprintf(stderr, "Error: Could not decrypt data\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -467,7 +595,7 @@ unsigned char* aes_cbc_openssl_decrypt(aes_context_t* context, const unsigned ch
     }
     plaintext_len = len;
     
-    // Finalize the decryption (remove padding)
+    // finalize the decryption 
     if (1 != EVP_DecryptFinal_ex(ctx, output + len, &len)) {
         fprintf(stderr, "Error: Padding verification failed. Data may be corrupted.\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -476,10 +604,10 @@ unsigned char* aes_cbc_openssl_decrypt(aes_context_t* context, const unsigned ch
     }
     plaintext_len += len;
     
-    // Clean up
+    // clean up
     EVP_CIPHER_CTX_free(ctx);
     
-    // Set the output length
+    // output length
     if (output_length) {
         *output_length = plaintext_len;
     }

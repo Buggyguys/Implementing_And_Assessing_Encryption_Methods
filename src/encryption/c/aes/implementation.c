@@ -13,26 +13,26 @@
 #include "aes_cfb.h"
 #include "aes_ofb.h"
 
-// Register AES implementations - simplified to only register standard and custom
+// register AES implementations - simplified to only register standard and custom
 void register_aes_implementations(implementation_registry_t* registry) {
     int index = registry->count;
     int implementations_before = registry->count;
     
-    // Get the configuration to determine AES parameters
+    // get the configuration to determine AES parameters
     char* key_size_str = getenv("AES_KEY_SIZE");
     char* mode_str = getenv("AES_MODE");
     char* use_stdlib_str = getenv("USE_STDLIB");
     char* use_custom_str = getenv("USE_CUSTOM");
     char* aes_enabled_str = getenv("AES_ENABLED");
     
-    // Default values if environment variables are not set
-    int key_size = key_size_str ? atoi(key_size_str) : 256;  // Default to 256
-    char mode[16] = "GCM";  // Default to GCM
-    int use_stdlib = use_stdlib_str ? atoi(use_stdlib_str) : 1;  // Default to true
-    int use_custom = use_custom_str ? atoi(use_custom_str) : 0;  // Default to false for now to match Go
+    // default values if environment variables are not set
+    int key_size = key_size_str ? atoi(key_size_str) : 256;  // default to 256
+    char mode[16] = "GCM";  // default to GCM
+    int use_stdlib = use_stdlib_str ? atoi(use_stdlib_str) : 1;  // default to true
+    int use_custom = use_custom_str ? atoi(use_custom_str) : 0;  // default to false for now to match Go
     int aes_enabled = aes_enabled_str ? atoi(aes_enabled_str) : 1;  // Default to enabled
     
-    // Check if AES is enabled in the configuration
+    // check if AES is enabled in the configuration
     if (!aes_enabled) {
         printf("AES implementations disabled in configuration\n");
         return;
@@ -42,7 +42,7 @@ void register_aes_implementations(implementation_registry_t* registry) {
         strncpy(mode, mode_str, sizeof(mode) - 1);
     }
     
-    // Register standard AES implementation if enabled
+    // register standard AES implementation if enabled
     if (use_stdlib) {
         strcpy(registry->implementations[index].name, "aes");
         registry->implementations[index].algo_type = ALGO_AES;
@@ -59,7 +59,7 @@ void register_aes_implementations(implementation_registry_t* registry) {
         registry->count++;
     }
     
-    // Register custom AES implementation if enabled
+    // register custom AES implementation if enabled
     if (use_custom) {
         index = registry->count;
         strcpy(registry->implementations[index].name, "aes_custom");
@@ -80,7 +80,7 @@ void register_aes_implementations(implementation_registry_t* registry) {
     printf("Registered %d AES implementations\n", registry->count - implementations_before);
 }
 
-// Standard library implementation functions
+// standard library implementation functions
 void* aes_init(void) {
     aes_context_t* context = (aes_context_t*)malloc(sizeof(aes_context_t));
     if (!context) {
@@ -90,14 +90,14 @@ void* aes_init(void) {
     
     memset(context, 0, sizeof(aes_context_t));
     
-    // Get configuration from environment variables
+    // get configuration from environment variables
     char* key_size_str = getenv("AES_KEY_SIZE");
     char* mode_str = getenv("AES_MODE");
     
-    // Set key size from environment or default to 256
+    // set key size from environment or default to 256
     context->key_size = key_size_str ? atoi(key_size_str) : 256;
     
-    // Set mode from environment or default to GCM
+    // set mode from environment or default to GCM
     if (mode_str) {
         strncpy(context->mode, mode_str, sizeof(context->mode) - 1);
     } else {
@@ -136,7 +136,7 @@ unsigned char* aes_encrypt(void* context, const unsigned char* data, size_t data
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // If key is provided, use it instead of the context key
+    // if key is provided, use it instead of the context key
     if (key) {
         if (aes_context->key) {
             free(aes_context->key);
@@ -152,18 +152,20 @@ unsigned char* aes_encrypt(void* context, const unsigned char* data, size_t data
         memcpy(aes_context->key, key, aes_context->key_length);
     }
     
-    // Check if key exists
+    // check if key exists
     if (!aes_context->key) {
         fprintf(stderr, "Error: AES key not set\n");
         return NULL;
     }
     
-    // Encrypt based on mode
+    // encrypt based on mode
     if (strcmp(aes_context->mode, "GCM") == 0) {
         #ifdef USE_OPENSSL
-        // For OpenSSL, we would need to handle large sizes appropriately
-        // For now, pass size_t directly to our implementation
-        return aes_gcm_encrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_gcm_openssl_encrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
         return aes_gcm_encrypt(aes_context, data, data_length, output_length);
         #endif
@@ -220,7 +222,7 @@ unsigned char* aes_decrypt(void* context, const unsigned char* data, size_t data
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // If key is provided, use it instead of the context key
+    // if key is provided, use it instead of the context key
     if (key) {
         if (aes_context->key) {
             free(aes_context->key);
@@ -236,34 +238,50 @@ unsigned char* aes_decrypt(void* context, const unsigned char* data, size_t data
         memcpy(aes_context->key, key, aes_context->key_length);
     }
     
-    // Check if key exists
+    // check if key exists
     if (!aes_context->key) {
         fprintf(stderr, "Error: AES key not set\n");
         return NULL;
     }
     
-    // Decrypt based on mode
+    // decrypt based on mode
     if (strcmp(aes_context->mode, "GCM") == 0) {
         #ifdef USE_OPENSSL
-        return aes_gcm_openssl_decrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_gcm_openssl_decrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
         return aes_gcm_decrypt(aes_context, data, data_length, output_length);
         #endif
     } else if (strcmp(aes_context->mode, "CBC") == 0) {
         #ifdef USE_OPENSSL
-        return aes_cbc_openssl_decrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_cbc_openssl_decrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
         return aes_cbc_decrypt(aes_context, data, data_length, output_length);
         #endif
     } else if (strcmp(aes_context->mode, "CFB") == 0) {
         #ifdef USE_OPENSSL
-        return aes_cfb_openssl_decrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_cfb_openssl_decrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
         return aes_cfb_decrypt(aes_context, data, data_length, output_length);
         #endif
     } else if (strcmp(aes_context->mode, "OFB") == 0) {
         #ifdef USE_OPENSSL
-        return aes_ofb_openssl_decrypt(aes_context, data, data_length, output_length);
+        int data_len = (int)data_length;
+        int out_len = 0;
+        unsigned char* result = aes_ofb_openssl_decrypt(aes_context, data, data_len, &out_len);
+        if (output_length) *output_length = (size_t)out_len;
+        return result;
         #else
         return aes_ofb_decrypt(aes_context, data, data_length, output_length);
         #endif
@@ -285,14 +303,14 @@ void* aes_custom_init(void) {
     
     memset(context, 0, sizeof(aes_context_t));
     
-    // Get configuration from environment variables
+    // get configuration from environment variables
     char* key_size_str = getenv("AES_KEY_SIZE");
     char* mode_str = getenv("AES_MODE");
     
-    // Set key size from environment or default to 256
+    // set key size from environment or default to 256
     context->key_size = key_size_str ? atoi(key_size_str) : 256;
     
-    // Set mode from environment or default to GCM
+    // set mode from environment or default to GCM
     if (mode_str) {
         strncpy(context->mode, mode_str, sizeof(context->mode) - 1);
     } else {
@@ -309,7 +327,7 @@ void* aes_custom_init(void) {
 }
 
 void aes_custom_cleanup(void* context) {
-    aes_cleanup(context); // Reuse standard cleanup
+    aes_cleanup(context); // reuse standard cleanup
 }
 
 unsigned char* aes_custom_encrypt(void* context, const unsigned char* data, size_t data_length, const unsigned char* key, size_t* output_length) {
@@ -317,7 +335,7 @@ unsigned char* aes_custom_encrypt(void* context, const unsigned char* data, size
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // If key is provided, use it instead of the context key
+    // if key is provided, use it instead of the context key
     if (key) {
         if (aes_context->key) {
             free(aes_context->key);
@@ -333,13 +351,13 @@ unsigned char* aes_custom_encrypt(void* context, const unsigned char* data, size
         memcpy(aes_context->key, key, aes_context->key_length);
     }
     
-    // Check if key exists
+    // check if key exists
     if (!aes_context->key) {
         fprintf(stderr, "Error: AES key not set\n");
         return NULL;
     }
     
-    // Encrypt based on mode using custom implementation
+    // encrypt based on mode using custom implementation
     if (strcmp(aes_context->mode, "GCM") == 0) {
         return aes_gcm_custom_encrypt(aes_context, data, data_length, output_length);
     } else if (strcmp(aes_context->mode, "CBC") == 0) {
@@ -371,7 +389,7 @@ unsigned char* aes_custom_decrypt(void* context, const unsigned char* data, size
     
     aes_context_t* aes_context = (aes_context_t*)context;
     
-    // If key is provided, use it instead of the context key
+    // if key is provided, use it instead of the context key
     if (key) {
         if (aes_context->key) {
             free(aes_context->key);
@@ -387,13 +405,13 @@ unsigned char* aes_custom_decrypt(void* context, const unsigned char* data, size
         memcpy(aes_context->key, key, aes_context->key_length);
     }
     
-    // Check if key exists
+    // check if key exists
     if (!aes_context->key) {
         fprintf(stderr, "Error: AES key not set\n");
         return NULL;
     }
     
-    // Decrypt based on mode using custom implementation
+    // decrypt based on mode using custom implementation
     if (strcmp(aes_context->mode, "GCM") == 0) {
         return aes_gcm_custom_decrypt(aes_context, data, data_length, output_length);
     } else if (strcmp(aes_context->mode, "CBC") == 0) {
@@ -408,13 +426,7 @@ unsigned char* aes_custom_decrypt(void* context, const unsigned char* data, size
     }
 }
 
-/**
- * Stream processing functions
- */
 unsigned char* aes_encrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    // For stream processing, we handle each chunk separately but maintain state across chunks if needed
-    
-    // In a real implementation, this would maintain state across chunks for certain modes (like CBC)
     size_t data_len = (size_t)data_length;
     size_t out_len = 0;
     unsigned char* result = aes_encrypt(context, data, data_len, key, &out_len);
@@ -423,14 +435,9 @@ unsigned char* aes_encrypt_stream(void* context, const unsigned char* data, int 
 }
 
 unsigned char* aes_decrypt_stream(void* context, const unsigned char* data, int data_length, const unsigned char* key, int chunk_index, int* output_length) {
-    // For stream processing, we handle each chunk separately but maintain state across chunks if needed
-    
-    // In a real implementation, this would maintain state across chunks for certain modes (like CBC)
-    return aes_decrypt(context, data, data_length, key, output_length);
+    size_t data_len = (size_t)data_length;
+    size_t out_len = 0;
+    unsigned char* result = aes_decrypt(context, data, data_len, key, &out_len);
+    if (output_length) *output_length = (int)out_len;
+    return result;
 }
-
-
-// AES-CBC
-// unsigned char* aes_cbc_encrypt(...) 
-// through:
-// unsigned char* aes_ecb_decrypt(...) 

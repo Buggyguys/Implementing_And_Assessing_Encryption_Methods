@@ -1,7 +1,3 @@
-#!/bin/bash
-# Build script for C encryption implementations
-
-# Exit on error
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -110,7 +106,7 @@ echo "Using OpenSSL library path: ${OPENSSL_LIB}"
 INCLUDE_FLAGS="-I${SCRIPT_DIR}/include -I${JSON_C_INCLUDE} -I${OPENSSL_INCLUDE} -I${SCRIPT_DIR}"
 
 # Common compilation flags
-CFLAGS="-Wall -O2 ${INCLUDE_FLAGS} -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations"
+CFLAGS="-Wall -O2 ${INCLUDE_FLAGS} -DOPENSSL_API_COMPAT=0x10100000L -Wno-deprecated-declarations -DUSE_OPENSSL"
 
 # Helper function to check if a file exists and contains actual implementation
 # rather than just being a placeholder
@@ -139,6 +135,7 @@ gcc ${CFLAGS} -c -o build/crypto_utils.o include/crypto_utils.c
 # AES implementation
 echo "Compiling AES..."
 # Compile individual AES mode files - Updated modes: CBC, GCM, CFB, OFB
+gcc ${CFLAGS} -c -o build/aes_core.o aes/aes_core.c
 gcc ${CFLAGS} -c -o build/aes_gcm.o aes/aes_gcm.c
 gcc ${CFLAGS} -c -o build/aes_cbc.o aes/aes_cbc.c
 gcc ${CFLAGS} -c -o build/aes_cfb.o aes/aes_cfb.c
@@ -149,22 +146,11 @@ gcc ${CFLAGS} -c -o build/aes_implementation.o aes/implementation.c
 
 # Camellia implementation
 echo "Compiling Camellia..."
-if ! check_implementation "camellia/implementation.c"; then
-    echo "Creating placeholder for Camellia implementation"
-    mkdir -p camellia
-    echo "// Placeholder implementation" > camellia/implementation.c
-    echo "#include \"implementation.h\"" >> camellia/implementation.c
-    echo "void register_camellia_implementations(implementation_registry_t* registry) {}" >> camellia/implementation.c
-else
-    # Compile individual Camellia mode files - Supported modes: CBC, CFB, OFB, ECB
-    echo "Compiling Camellia components..."
-    gcc ${CFLAGS} -c -o build/camellia_common.o camellia/camellia_common.c
-    gcc ${CFLAGS} -c -o build/camellia_key.o camellia/camellia_key.c
-    gcc ${CFLAGS} -c -o build/camellia_cbc.o camellia/camellia_cbc.c
-    gcc ${CFLAGS} -c -o build/camellia_cfb.o camellia/camellia_cfb.c
-    gcc ${CFLAGS} -c -o build/camellia_ofb.o camellia/camellia_ofb.c
-    gcc ${CFLAGS} -c -o build/camellia_ecb.o camellia/camellia_ecb.c
-fi
+echo "Creating placeholder for Camellia implementation"
+mkdir -p camellia
+echo "// Placeholder implementation" > camellia/implementation.c
+echo "#include \"implementation.h\"" >> camellia/implementation.c
+echo "void register_camellia_implementations(implementation_registry_t* registry) {}" >> camellia/implementation.c
 gcc ${CFLAGS} -c -o build/camellia_implementation.o camellia/implementation.c
 
 # ChaCha20 implementation
@@ -245,6 +231,7 @@ gcc -Wall -O2 \
     build/cJSON.o \
     build/crypto_utils.o \
     build/aes_implementation.o \
+    build/aes_core.o \
     build/aes_gcm.o \
     build/aes_cbc.o \
     build/aes_cfb.o \

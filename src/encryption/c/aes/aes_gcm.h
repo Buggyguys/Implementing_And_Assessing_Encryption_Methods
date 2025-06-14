@@ -11,4 +11,8 @@ unsigned char* aes_gcm_decrypt(aes_context_t* context, const unsigned char* data
 unsigned char* aes_gcm_custom_encrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length);
 unsigned char* aes_gcm_custom_decrypt(aes_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length);
 
-#endif /* AES_GCM_H */ 
+// OpenSSL AES-GCM implementation
+unsigned char* aes_gcm_openssl_encrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length);
+unsigned char* aes_gcm_openssl_decrypt(aes_context_t* context, const unsigned char* data, int data_length, int* output_length);
+
+#endif 
