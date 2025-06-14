@@ -22,6 +22,16 @@ unsigned char* camellia_cbc_encrypt(camellia_context_t* context, const unsigned 
         context->iv_length = crypto_get_standard_iv_size("Camellia", "CBC"); // 16 bytes
     }
     
+    // Generate IV if not already set
+    if (!context->iv) {
+        context->iv = (unsigned char*)crypto_secure_alloc(context->iv_length);
+        if (!context->iv) {
+            fprintf(stderr, "Error: Could not allocate memory for IV\n");
+            return NULL;
+        }
+        generate_random_bytes(context->iv, context->iv_length);
+    }
+    
     // Calculate tag size
     int tag_size = AUTH_TAG_SIZE;
     

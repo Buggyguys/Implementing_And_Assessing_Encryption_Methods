@@ -4,9 +4,9 @@
 #include "implementation.h"
 #include "aes_key.h"
 #include "aes_cbc.h"
-#include "aes_ctr.h"
+#include "aes_cfb.h"
+#include "aes_ofb.h"
 #include "aes_gcm.h"
-#include "aes_ecb.h"
 
 // Common AES initialization and cleanup functions
 void* aes_init(void);

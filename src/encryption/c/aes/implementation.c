@@ -9,8 +9,8 @@
 #include "aes_key.h"
 #include "aes_gcm.h"
 #include "aes_cbc.h"
-#include "aes_ctr.h"
-#include "aes_ecb.h"
+#include "aes_cfb.h"
+#include "aes_ofb.h"
 
 // Register AES implementations - simplified to only register standard and custom
 void register_aes_implementations(implementation_registry_t* registry) {
@@ -170,17 +170,17 @@ unsigned char* aes_encrypt(void* context, const unsigned char* data, int data_le
         #else
         return aes_cbc_encrypt(aes_context, data, data_length, output_length);
         #endif
-    } else if (strcmp(aes_context->mode, "CTR") == 0) {
+    } else if (strcmp(aes_context->mode, "CFB") == 0) {
         #ifdef USE_OPENSSL
-        return aes_ctr_openssl_encrypt(aes_context, data, data_length, output_length);
+        return aes_cfb_openssl_encrypt(aes_context, data, data_length, output_length);
         #else
-        return aes_ctr_encrypt(aes_context, data, data_length, output_length);
+        return aes_cfb_encrypt(aes_context, data, data_length, output_length);
         #endif
-    } else if (strcmp(aes_context->mode, "ECB") == 0) {
+    } else if (strcmp(aes_context->mode, "OFB") == 0) {
         #ifdef USE_OPENSSL
-        return aes_ecb_openssl_encrypt(aes_context, data, data_length, output_length);
+        return aes_ofb_openssl_encrypt(aes_context, data, data_length, output_length);
         #else
-        return aes_ecb_encrypt(aes_context, data, data_length, output_length);
+        return aes_ofb_encrypt(aes_context, data, data_length, output_length);
         #endif
     } else {
         fprintf(stderr, "Error: Unsupported AES mode: %s\n", aes_context->mode);
@@ -228,17 +228,17 @@ unsigned char* aes_decrypt(void* context, const unsigned char* data, int data_le
         #else
         return aes_cbc_decrypt(aes_context, data, data_length, output_length);
         #endif
-    } else if (strcmp(aes_context->mode, "CTR") == 0) {
+    } else if (strcmp(aes_context->mode, "CFB") == 0) {
         #ifdef USE_OPENSSL
-        return aes_ctr_openssl_decrypt(aes_context, data, data_length, output_length);
+        return aes_cfb_openssl_decrypt(aes_context, data, data_length, output_length);
         #else
-        return aes_ctr_decrypt(aes_context, data, data_length, output_length);
+        return aes_cfb_decrypt(aes_context, data, data_length, output_length);
         #endif
-    } else if (strcmp(aes_context->mode, "ECB") == 0) {
+    } else if (strcmp(aes_context->mode, "OFB") == 0) {
         #ifdef USE_OPENSSL
-        return aes_ecb_openssl_decrypt(aes_context, data, data_length, output_length);
+        return aes_ofb_openssl_decrypt(aes_context, data, data_length, output_length);
         #else
-        return aes_ecb_decrypt(aes_context, data, data_length, output_length);
+        return aes_ofb_decrypt(aes_context, data, data_length, output_length);
         #endif
     } else {
         fprintf(stderr, "Error: Unsupported AES mode: %s\n", aes_context->mode);
@@ -317,10 +317,10 @@ unsigned char* aes_custom_encrypt(void* context, const unsigned char* data, int 
         return aes_gcm_custom_encrypt(aes_context, data, data_length, output_length);
     } else if (strcmp(aes_context->mode, "CBC") == 0) {
         return aes_cbc_custom_encrypt(aes_context, data, data_length, output_length);
-    } else if (strcmp(aes_context->mode, "CTR") == 0) {
-        return aes_ctr_custom_encrypt(aes_context, data, data_length, output_length);
-    } else if (strcmp(aes_context->mode, "ECB") == 0) {
-        return aes_ecb_custom_encrypt(aes_context, data, data_length, output_length);
+    } else if (strcmp(aes_context->mode, "CFB") == 0) {
+        return aes_cfb_custom_encrypt(aes_context, data, data_length, output_length);
+    } else if (strcmp(aes_context->mode, "OFB") == 0) {
+        return aes_ofb_custom_encrypt(aes_context, data, data_length, output_length);
     } else {
         fprintf(stderr, "Error: Unsupported AES mode: %s\n", aes_context->mode);
         return NULL;
@@ -359,10 +359,10 @@ unsigned char* aes_custom_decrypt(void* context, const unsigned char* data, int 
         return aes_gcm_custom_decrypt(aes_context, data, data_length, output_length);
     } else if (strcmp(aes_context->mode, "CBC") == 0) {
         return aes_cbc_custom_decrypt(aes_context, data, data_length, output_length);
-    } else if (strcmp(aes_context->mode, "CTR") == 0) {
-        return aes_ctr_custom_decrypt(aes_context, data, data_length, output_length);
-    } else if (strcmp(aes_context->mode, "ECB") == 0) {
-        return aes_ecb_custom_decrypt(aes_context, data, data_length, output_length);
+    } else if (strcmp(aes_context->mode, "CFB") == 0) {
+        return aes_cfb_custom_decrypt(aes_context, data, data_length, output_length);
+    } else if (strcmp(aes_context->mode, "OFB") == 0) {
+        return aes_ofb_custom_decrypt(aes_context, data, data_length, output_length);
     } else {
         fprintf(stderr, "Error: Unsupported AES mode: %s\n", aes_context->mode);
         return NULL;

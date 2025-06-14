@@ -7,9 +7,9 @@
 #include "../include/utils.h"
 #include "camellia_common.h"
 #include "camellia_key.h"
-#include "camellia_gcm.h"
 #include "camellia_cbc.h"
-#include "camellia_ctr.h"
+#include "camellia_cfb.h"
+#include "camellia_ofb.h"
 #include "camellia_ecb.h"
 
 // Register Camellia implementations - simplified to only register standard and custom
@@ -26,7 +26,7 @@ void register_camellia_implementations(implementation_registry_t* registry) {
     
     // Default values if environment variables are not set
     int key_size = key_size_str ? atoi(key_size_str) : 256;  // Default to 256
-    char mode[16] = "GCM";  // Default to GCM
+    char mode[16] = "CBC";  // Default to CBC
     int use_stdlib = use_stdlib_str ? atoi(use_stdlib_str) : 1;  // Default to true
     int use_custom = use_custom_str ? atoi(use_custom_str) : 1;  // Default to true
     int camellia_enabled = camellia_enabled_str ? atoi(camellia_enabled_str) : 1;  // Default to enabled
@@ -96,11 +96,11 @@ void* camellia_init(void) {
     // Set key size from environment or default to 256
     context->key_size = key_size_str ? atoi(key_size_str) : 256;
     
-    // Set mode from environment or default to GCM
+    // Set mode from environment or default to CBC
     if (mode_str) {
         strncpy(context->mode, mode_str, sizeof(context->mode) - 1);
     } else {
-        strcpy(context->mode, "GCM");
+        strcpy(context->mode, "CBC");
     }
     
     context->is_custom = 0;
@@ -158,30 +158,18 @@ unsigned char* camellia_encrypt(void* context, const unsigned char* data, int da
     }
     
     // Encrypt based on mode
-    if (strcmp(camellia_context->mode, "GCM") == 0) {
-        #ifdef USE_OPENSSL
-        return camellia_gcm_openssl_encrypt(camellia_context, data, data_length, output_length);
-        #else
-        return camellia_gcm_encrypt(camellia_context, data, data_length, output_length);
-        #endif
-    } else if (strcmp(camellia_context->mode, "CBC") == 0) {
+    if (strcmp(camellia_context->mode, "CBC") == 0) {
         #ifdef USE_OPENSSL
         return camellia_cbc_openssl_encrypt(camellia_context, data, data_length, output_length);
         #else
         return camellia_cbc_encrypt(camellia_context, data, data_length, output_length);
         #endif
-    } else if (strcmp(camellia_context->mode, "CTR") == 0) {
-        #ifdef USE_OPENSSL
-        return camellia_ctr_openssl_encrypt(camellia_context, data, data_length, output_length);
-        #else
-        return camellia_ctr_encrypt(camellia_context, data, data_length, output_length);
-        #endif
+    } else if (strcmp(camellia_context->mode, "CFB") == 0) {
+        return camellia_cfb_encrypt(camellia_context, data, data_length, output_length);
+    } else if (strcmp(camellia_context->mode, "OFB") == 0) {
+        return camellia_ofb_encrypt(camellia_context, data, data_length, output_length);
     } else if (strcmp(camellia_context->mode, "ECB") == 0) {
-        #ifdef USE_OPENSSL
-        return camellia_ecb_openssl_encrypt(camellia_context, data, data_length, output_length);
-        #else
         return camellia_ecb_encrypt(camellia_context, data, data_length, output_length);
-        #endif
     } else {
         fprintf(stderr, "Error: Unsupported Camellia mode: %s\n", camellia_context->mode);
         return NULL;
@@ -216,30 +204,18 @@ unsigned char* camellia_decrypt(void* context, const unsigned char* data, int da
     }
     
     // Decrypt based on mode
-    if (strcmp(camellia_context->mode, "GCM") == 0) {
-        #ifdef USE_OPENSSL
-        return camellia_gcm_openssl_decrypt(camellia_context, data, data_length, output_length);
-        #else
-        return camellia_gcm_decrypt(camellia_context, data, data_length, output_length);
-        #endif
-    } else if (strcmp(camellia_context->mode, "CBC") == 0) {
+    if (strcmp(camellia_context->mode, "CBC") == 0) {
         #ifdef USE_OPENSSL
         return camellia_cbc_openssl_decrypt(camellia_context, data, data_length, output_length);
         #else
         return camellia_cbc_decrypt(camellia_context, data, data_length, output_length);
         #endif
-    } else if (strcmp(camellia_context->mode, "CTR") == 0) {
-        #ifdef USE_OPENSSL
-        return camellia_ctr_openssl_decrypt(camellia_context, data, data_length, output_length);
-        #else
-        return camellia_ctr_decrypt(camellia_context, data, data_length, output_length);
-        #endif
+    } else if (strcmp(camellia_context->mode, "CFB") == 0) {
+        return camellia_cfb_decrypt(camellia_context, data, data_length, output_length);
+    } else if (strcmp(camellia_context->mode, "OFB") == 0) {
+        return camellia_ofb_decrypt(camellia_context, data, data_length, output_length);
     } else if (strcmp(camellia_context->mode, "ECB") == 0) {
-        #ifdef USE_OPENSSL
-        return camellia_ecb_openssl_decrypt(camellia_context, data, data_length, output_length);
-        #else
         return camellia_ecb_decrypt(camellia_context, data, data_length, output_length);
-        #endif
     } else {
         fprintf(stderr, "Error: Unsupported Camellia mode: %s\n", camellia_context->mode);
         return NULL;
@@ -263,11 +239,11 @@ void* camellia_custom_init(void) {
     // Set key size from environment or default to 256
     context->key_size = key_size_str ? atoi(key_size_str) : 256;
     
-    // Set mode from environment or default to GCM
+    // Set mode from environment or default to CBC
     if (mode_str) {
         strncpy(context->mode, mode_str, sizeof(context->mode) - 1);
     } else {
-        strcpy(context->mode, "GCM");
+        strcpy(context->mode, "CBC");
     }
     
     context->is_custom = 1;
@@ -312,14 +288,14 @@ unsigned char* camellia_custom_encrypt(void* context, const unsigned char* data,
     
     // Custom encrypt based on mode - for now, just use the standard implementations
     // In a real implementation, you would have custom versions of these functions
-    if (strcmp(camellia_context->mode, "GCM") == 0) {
-        return camellia_gcm_encrypt(camellia_context, data, data_length, output_length);
-    } else if (strcmp(camellia_context->mode, "CBC") == 0) {
+    if (strcmp(camellia_context->mode, "CBC") == 0) {
         return camellia_cbc_encrypt(camellia_context, data, data_length, output_length);
-    } else if (strcmp(camellia_context->mode, "CTR") == 0) {
-        return camellia_ctr_encrypt(camellia_context, data, data_length, output_length);
+    } else if (strcmp(camellia_context->mode, "CFB") == 0) {
+        return camellia_cfb_custom_encrypt(camellia_context, data, data_length, output_length);
+    } else if (strcmp(camellia_context->mode, "OFB") == 0) {
+        return camellia_ofb_custom_encrypt(camellia_context, data, data_length, output_length);
     } else if (strcmp(camellia_context->mode, "ECB") == 0) {
-        return camellia_ecb_encrypt(camellia_context, data, data_length, output_length);
+        return camellia_ecb_custom_encrypt(camellia_context, data, data_length, output_length);
     } else {
         fprintf(stderr, "Error: Unsupported Camellia mode: %s\n", camellia_context->mode);
         return NULL;
@@ -355,14 +331,14 @@ unsigned char* camellia_custom_decrypt(void* context, const unsigned char* data,
     
     // Custom decrypt based on mode - for now, just use the standard implementations
     // In a real implementation, you would have custom versions of these functions
-    if (strcmp(camellia_context->mode, "GCM") == 0) {
-        return camellia_gcm_decrypt(camellia_context, data, data_length, output_length);
-    } else if (strcmp(camellia_context->mode, "CBC") == 0) {
+    if (strcmp(camellia_context->mode, "CBC") == 0) {
         return camellia_cbc_decrypt(camellia_context, data, data_length, output_length);
-    } else if (strcmp(camellia_context->mode, "CTR") == 0) {
-        return camellia_ctr_decrypt(camellia_context, data, data_length, output_length);
+    } else if (strcmp(camellia_context->mode, "CFB") == 0) {
+        return camellia_cfb_custom_decrypt(camellia_context, data, data_length, output_length);
+    } else if (strcmp(camellia_context->mode, "OFB") == 0) {
+        return camellia_ofb_custom_decrypt(camellia_context, data, data_length, output_length);
     } else if (strcmp(camellia_context->mode, "ECB") == 0) {
-        return camellia_ecb_decrypt(camellia_context, data, data_length, output_length);
+        return camellia_ecb_custom_decrypt(camellia_context, data, data_length, output_length);
     } else {
         fprintf(stderr, "Error: Unsupported Camellia mode: %s\n", camellia_context->mode);
         return NULL;

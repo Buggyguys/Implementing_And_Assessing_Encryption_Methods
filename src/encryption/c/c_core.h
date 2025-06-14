@@ -25,7 +25,7 @@ typedef struct {
     algorithm_type_t algo_type;   // Algorithm type
     int is_custom;                // Whether this is a custom implementation
     int key_size;                 // Key size in bits
-    char mode[16];                // Mode of operation (CBC, CTR, etc.)
+    char mode[16];                // Mode of operation (CBC, GCM, CFB, OFB)
     
     // Function pointers for algorithm operations
     void* (*init)(void);
@@ -45,17 +45,29 @@ typedef struct {
     int count;
 } implementation_registry_t;
 
+// Dataset information structure
+typedef struct {
+    char path[1024];
+    size_t size_bytes;
+} dataset_info_t;
+
 // Test configuration structure
 typedef struct {
     // Test parameters
     int iterations;
+    char processing_strategy[32];
+    char chunk_size[32];
+    int use_stdlib;
+    int use_custom;
+    
+    // Dataset information - dual datasets for symmetric and asymmetric
+    dataset_info_t symmetric_dataset;
+    dataset_info_t asymmetric_dataset;
+    
+    // Legacy single dataset support (for backward compatibility)
     char dataset_path[1024];
     size_t dataset_size_bytes;
     int dataset_size_kb;
-    int use_stdlib;
-    int use_custom;
-    char processing_strategy[32];
-    char chunk_size[32];
     
     // C-specific parameters
     int memory_mode;
@@ -63,9 +75,9 @@ typedef struct {
     // Session directory
     char session_dir[1024];
     
-    // AES configuration
+    // AES configuration - Updated modes: CBC, GCM, CFB, OFB
     char aes_key_size[16];  // "128", "192", or "256"
-    char aes_mode[16];      // "ECB", "CBC", "CTR", or "GCM"
+    char aes_mode[16];      // "CBC", "GCM", "CFB", or "OFB"
     
     // Algorithm enabled flags
     int aes_enabled;
@@ -77,11 +89,10 @@ typedef struct {
     // Algorithm-specific configurations
     char rsa_key_size[16];
     char rsa_padding[16];
-    int rsa_key_reuse;
-    int rsa_key_count;
     
     char ecc_curve[32];
     
+    // Camellia configuration - Updated modes: CBC, GCM, CFB, OFB (note: GCM not supported in stdlib)
     char camellia_key_size[16];
     char camellia_mode[16];
 } TestConfig;

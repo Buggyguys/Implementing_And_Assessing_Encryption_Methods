@@ -225,11 +225,9 @@ TestConfig* parse_config_file(const char* config_path) {
     config->camellia_enabled = 0;
     strcpy(config->rsa_key_size, "2048");
     strcpy(config->rsa_padding, "OAEP");
-    config->rsa_key_reuse = 0;
-    config->rsa_key_count = 1;
     strcpy(config->ecc_curve, "P-256");
     strcpy(config->camellia_key_size, "256");
-    strcpy(config->camellia_mode, "GCM");
+    strcpy(config->camellia_mode, "CBC");  // Default to CBC for Camellia (GCM not supported in stdlib)
     
     // Read the configuration file
     FILE* config_file = fopen(config_path, "rb");
@@ -381,9 +379,34 @@ TestConfig* parse_config_file(const char* config_path) {
             config->iterations = iterations->valueint;
         }
         
-        cJSON* dataset_path = cJSON_GetObjectItem(test_params, "dataset_path");
-        if (dataset_path && cJSON_IsString(dataset_path)) {
-            strncpy(config->dataset_path, dataset_path->valuestring, sizeof(config->dataset_path) - 1);
+        // Handle new dual dataset format
+        cJSON* dataset_info = cJSON_GetObjectItem(test_params, "dataset_info");
+        if (dataset_info) {
+            // New format with separate symmetric/asymmetric datasets
+            cJSON* symmetric = cJSON_GetObjectItem(dataset_info, "symmetric");
+            if (symmetric) {
+                cJSON* sym_path = cJSON_GetObjectItem(symmetric, "path");
+                if (sym_path && cJSON_IsString(sym_path)) {
+                    strncpy(config->symmetric_dataset.path, sym_path->valuestring, sizeof(config->symmetric_dataset.path) - 1);
+                }
+            }
+            
+            cJSON* asymmetric = cJSON_GetObjectItem(dataset_info, "asymmetric");
+            if (asymmetric) {
+                cJSON* asym_path = cJSON_GetObjectItem(asymmetric, "path");
+                if (asym_path && cJSON_IsString(asym_path)) {
+                    strncpy(config->asymmetric_dataset.path, asym_path->valuestring, sizeof(config->asymmetric_dataset.path) - 1);
+                }
+            }
+        } else {
+            // Fallback to legacy single dataset format
+            cJSON* dataset_path = cJSON_GetObjectItem(test_params, "dataset_path");
+            if (dataset_path && cJSON_IsString(dataset_path)) {
+                strncpy(config->dataset_path, dataset_path->valuestring, sizeof(config->dataset_path) - 1);
+                // Use same path for both datasets in legacy mode
+                strncpy(config->symmetric_dataset.path, dataset_path->valuestring, sizeof(config->symmetric_dataset.path) - 1);
+                strncpy(config->asymmetric_dataset.path, dataset_path->valuestring, sizeof(config->asymmetric_dataset.path) - 1);
+            }
         }
         
         cJSON* use_stdlib = cJSON_GetObjectItem(test_params, "use_stdlib");
@@ -426,14 +449,35 @@ TestConfig* parse_config_file(const char* config_path) {
         }
     }
     
-    // If dataset path is provided, check file size
+    // Check dataset file sizes
+    if (strlen(config->symmetric_dataset.path) > 0) {
+        struct stat st;
+        if (stat(config->symmetric_dataset.path, &st) == 0) {
+            config->symmetric_dataset.size_bytes = st.st_size;
+            printf("Symmetric dataset size: %zu bytes\n", config->symmetric_dataset.size_bytes);
+        } else {
+            fprintf(stderr, "Warning: Could not determine symmetric dataset size: %s\n", strerror(errno));
+        }
+    }
+    
+    if (strlen(config->asymmetric_dataset.path) > 0) {
+        struct stat st;
+        if (stat(config->asymmetric_dataset.path, &st) == 0) {
+            config->asymmetric_dataset.size_bytes = st.st_size;
+            printf("Asymmetric dataset size: %zu bytes\n", config->asymmetric_dataset.size_bytes);
+        } else {
+            fprintf(stderr, "Warning: Could not determine asymmetric dataset size: %s\n", strerror(errno));
+        }
+    }
+    
+    // Legacy support: if dataset_path is provided, check file size
     if (strlen(config->dataset_path) > 0) {
         struct stat st;
         if (stat(config->dataset_path, &st) == 0) {
             config->dataset_size_bytes = st.st_size;
-            printf("Dataset size: %zu bytes\n", config->dataset_size_bytes);
+            printf("Legacy dataset size: %zu bytes\n", config->dataset_size_bytes);
         } else {
-            fprintf(stderr, "Warning: Could not determine dataset size: %s\n", strerror(errno));
+            fprintf(stderr, "Warning: Could not determine legacy dataset size: %s\n", strerror(errno));
         }
     }
     
@@ -508,11 +552,22 @@ void run_benchmarks(TestConfig* config) {
     
     cJSON_AddStringToObject(results_obj, "language", "c");
     
-    // Add dataset info
-    cJSON* dataset_obj = cJSON_CreateObject();
-    cJSON_AddStringToObject(dataset_obj, "path", config->dataset_path);
-    cJSON_AddNumberToObject(dataset_obj, "size_bytes", config->dataset_size_bytes);
-    cJSON_AddItemToObject(results_obj, "dataset", dataset_obj);
+    // Add datasets info (dual dataset support)
+    cJSON* datasets_obj = cJSON_CreateObject();
+    
+    // Symmetric dataset
+    cJSON* symmetric_obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(symmetric_obj, "path", config->symmetric_dataset.path);
+    cJSON_AddNumberToObject(symmetric_obj, "size_bytes", config->symmetric_dataset.size_bytes);
+    cJSON_AddItemToObject(datasets_obj, "symmetric", symmetric_obj);
+    
+    // Asymmetric dataset
+    cJSON* asymmetric_obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(asymmetric_obj, "path", config->asymmetric_dataset.path);
+    cJSON_AddNumberToObject(asymmetric_obj, "size_bytes", config->asymmetric_dataset.size_bytes);
+    cJSON_AddItemToObject(datasets_obj, "asymmetric", asymmetric_obj);
+    
+    cJSON_AddItemToObject(results_obj, "datasets", datasets_obj);
     
     // Add test configuration
     cJSON* test_config_obj = cJSON_CreateObject();
@@ -531,22 +586,10 @@ void run_benchmarks(TestConfig* config) {
     // Create encryption_results container
     cJSON* encryption_results_obj = cJSON_CreateObject();
     
-    // Determine the processing strategy and load test data
+    // Determine the processing strategy
     processing_strategy_t strategy = PROCESSING_MEMORY;
-    size_t data_size = 0;
-    unsigned char* test_data = NULL;
-    
     if (strcmp(config->processing_strategy, "Stream") == 0) {
         strategy = PROCESSING_STREAM;
-        // We don't need to print this message as it duplicates info
-    } else {
-        // Load the entire file into memory
-        test_data = read_file(config->dataset_path, &data_size);
-        if (!test_data) {
-            fprintf(stderr, "Error: Could not read test data\n");
-            cJSON_Delete(results_obj);
-            return;
-        }
     }
     
     // Iterate through all registered implementations
@@ -621,6 +664,35 @@ void run_benchmarks(TestConfig* config) {
             // Add implementation details
             metrics.is_custom_implementation = impl->is_custom;
             
+            // Determine which dataset to use based on algorithm type
+            const char* dataset_path;
+            size_t data_size;
+            unsigned char* test_data = NULL;
+            
+            // Select appropriate dataset based on algorithm type
+            if (impl->algo_type == ALGO_RSA || impl->algo_type == ALGO_ECC) {
+                // Asymmetric algorithms
+                dataset_path = config->asymmetric_dataset.path;
+                data_size = config->asymmetric_dataset.size_bytes;
+                printf("    Using asymmetric dataset: %s\n", dataset_path);
+            } else {
+                // Symmetric algorithms (AES, Camellia, ChaCha20)
+                dataset_path = config->symmetric_dataset.path;
+                data_size = config->symmetric_dataset.size_bytes;
+                printf("    Using symmetric dataset: %s\n", dataset_path);
+            }
+            
+            // For memory mode, load the appropriate dataset
+            if (strategy == PROCESSING_MEMORY) {
+                test_data = read_file(dataset_path, &data_size);
+                if (!test_data) {
+                    fprintf(stderr, "Error: Could not read dataset: %s\n", dataset_path);
+                    free(key);
+                    impl->cleanup(ctx);
+                    continue;
+                }
+            }
+            
             // Add key generation metrics to iteration object
             cJSON_AddNumberToObject(iter_obj, "keygen_time_ns", (double)metrics.keygen_time_ns);
             cJSON_AddNumberToObject(iter_obj, "keygen_cpu_time_ns", (double)metrics.keygen_cpu_time_ns);
@@ -663,7 +735,7 @@ void run_benchmarks(TestConfig* config) {
             } else {
                 // Stream processing - encrypt in chunks
                 printf("    Encrypting data (Stream mode)...\n");
-                chunked_file_t* cf = init_chunked_file(config->dataset_path, chunk_size);
+                chunked_file_t* cf = init_chunked_file(dataset_path, chunk_size);
                 if (!cf) {
                     fprintf(stderr, "Error: Failed to initialize chunked file\n");
                     free(key);
@@ -819,7 +891,7 @@ void run_benchmarks(TestConfig* config) {
                 // Each chunk was encrypted separately with a 4-byte size header
                 
                 // Allocate buffer for decrypted data
-                size_t max_plaintext_size = config->dataset_size_bytes + 1024; // Add some extra space
+                size_t max_plaintext_size = data_size + 1024; // Add some extra space
                 decrypted = (unsigned char*)malloc(max_plaintext_size);
                 if (!decrypted) {
                     fprintf(stderr, "Error: Failed to allocate memory for decrypted data\n");
@@ -832,7 +904,7 @@ void run_benchmarks(TestConfig* config) {
                 plaintext_length = 0;
                 size_t ciphertext_offset = 0;
                 size_t chunk_counter = 0;
-                size_t total_chunks = (config->dataset_size_bytes + chunk_size - 1) / chunk_size;
+                size_t total_chunks = (data_size + chunk_size - 1) / chunk_size;
                 
                 // Process each encrypted chunk using the stored size headers
                 while (ciphertext_offset + 4 < ciphertext_length && chunk_counter < total_chunks) {
@@ -938,24 +1010,24 @@ void run_benchmarks(TestConfig* config) {
                     // Since we don't have the full data in memory for comparison,
                     // we'll just check if the decrypted length is close to expected
                     // Allow for small variations in length (e.g., due to nonce/IV/padding)
-                    size_t length_difference = plaintext_length > config->dataset_size_bytes ? 
-                        plaintext_length - config->dataset_size_bytes : 
-                        config->dataset_size_bytes - plaintext_length;
+                    size_t length_difference = plaintext_length > data_size ? 
+                        plaintext_length - data_size : 
+                        data_size - plaintext_length;
                     
                     // Calculate tolerance based on dataset size (0.02% of dataset size or at least 32 bytes)
-                    size_t tolerance = config->dataset_size_bytes / 5000;
+                    size_t tolerance = data_size / 5000;
                     if (tolerance < 32) tolerance = 32;
                     
                     // Print the tolerance for debugging
                     if (length_difference <= tolerance) {
                         printf("    Verification (Stream mode): Length check passed (diff %zu/%zu bytes, within %.3f%% tolerance), full data verification skipped\n", 
-                               length_difference, tolerance, (double)length_difference / config->dataset_size_bytes * 100.0);
+                               length_difference, tolerance, (double)length_difference / data_size * 100.0);
                         // In stream mode, we consider it correct if lengths are close enough
                         is_correct = 1;
                     } else {
                         printf("    Verification (Stream mode): FAILED - Length mismatch (got %d, expected %zu, diff %zu bytes/%.3f%%)\n", 
-                               plaintext_length, config->dataset_size_bytes, length_difference, 
-                               (double)length_difference / config->dataset_size_bytes * 100.0);
+                               plaintext_length, data_size, length_difference, 
+                               (double)length_difference / data_size * 100.0);
                     }
                 } else if (plaintext_length != data_size) {
                     printf("    Verification: FAILED - Length mismatch (got %d, expected %zu)\n", 
@@ -1003,6 +1075,10 @@ void run_benchmarks(TestConfig* config) {
             free(decrypted);
             free(ciphertext);
             free(key);
+            if (test_data) {
+                free(test_data);
+                test_data = NULL;
+            }
             
             printf("    Iteration %d completed %s\n", iter + 1, 
                    is_correct ? "successfully" : "with verification failures");
@@ -1204,11 +1280,22 @@ void run_benchmarks(TestConfig* config) {
                 }
             }
             
-            // Add throughput metrics
-            double encrypt_throughput_bps = (config->dataset_size_bytes * 8.0) / (avg_encrypt_time_ns / 1e9);
-            double decrypt_throughput_bps = (config->dataset_size_bytes * 8.0) / (avg_decrypt_time_ns / 1e9);
-            double encrypt_mbps = (config->dataset_size_bytes / (1024.0 * 1024.0)) / (avg_encrypt_time_ns / 1e9);
-            double decrypt_mbps = (config->dataset_size_bytes / (1024.0 * 1024.0)) / (avg_decrypt_time_ns / 1e9);
+            // Add throughput metrics (using size from first iteration)
+            size_t dataset_size_for_throughput = 0;
+            if (actual_iterations > 0) {
+                cJSON* first_iter = cJSON_GetArrayItem(iterations_array, 0);
+                if (first_iter) {
+                    cJSON* input_size = cJSON_GetObjectItem(first_iter, "input_size_bytes");
+                    if (input_size && cJSON_IsNumber(input_size)) {
+                        dataset_size_for_throughput = (size_t)input_size->valuedouble;
+                    }
+                }
+            }
+            
+            double encrypt_throughput_bps = (dataset_size_for_throughput * 8.0) / (avg_encrypt_time_ns / 1e9);
+            double decrypt_throughput_bps = (dataset_size_for_throughput * 8.0) / (avg_decrypt_time_ns / 1e9);
+            double encrypt_mbps = (dataset_size_for_throughput / (1024.0 * 1024.0)) / (avg_encrypt_time_ns / 1e9);
+            double decrypt_mbps = (dataset_size_for_throughput / (1024.0 * 1024.0)) / (avg_decrypt_time_ns / 1e9);
             
             cJSON_AddNumberToObject(aggregated_metrics, "avg_encrypt_throughput_bps", encrypt_throughput_bps);
             cJSON_AddNumberToObject(aggregated_metrics, "avg_decrypt_throughput_bps", decrypt_throughput_bps);
@@ -1217,8 +1304,8 @@ void run_benchmarks(TestConfig* config) {
             
             // Add overhead metrics
             double overhead_percent = 0;
-            if (config->dataset_size_bytes > 0 && total_ciphertext_size > 0) {
-                overhead_percent = ((total_ciphertext_size - config->dataset_size_bytes) / (double)config->dataset_size_bytes) * 100.0;
+            if (dataset_size_for_throughput > 0 && total_ciphertext_size > 0) {
+                overhead_percent = ((total_ciphertext_size - dataset_size_for_throughput) / (double)dataset_size_for_throughput) * 100.0;
             }
             cJSON_AddNumberToObject(aggregated_metrics, "avg_ciphertext_overhead_percent", overhead_percent);
             
@@ -1266,10 +1353,7 @@ void run_benchmarks(TestConfig* config) {
         // No need to clean up anything here - cleanup happens in each iteration
     }
     
-    // Free test data if we loaded it in memory mode
-    if (strategy == PROCESSING_MEMORY && test_data) {
-        free(test_data);
-    }
+    // Test data is now freed within each iteration loop
     
     // Add encryption_results to results
     cJSON_AddItemToObject(results_obj, "encryption_results", encryption_results_obj);

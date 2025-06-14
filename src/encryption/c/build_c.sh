@@ -37,7 +37,7 @@ if [ $CLEAN_BUILD -eq 1 ]; then
             
             # For Camellia, also remove the component files if they were created as placeholders
             if [ "$impl_dir" = "camellia" ]; then
-                for component in camellia_common camellia_key camellia_gcm camellia_cbc camellia_ctr camellia_ecb; do
+                for component in camellia_common camellia_key camellia_cbc camellia_cfb camellia_ofb; do
                     if [ -f "${impl_dir}/${component}.c" ] && grep -q "// Placeholder implementation" "${impl_dir}/${component}.c"; then
                         echo "Removing placeholder ${impl_dir}/${component}.c..."
                         rm -f "${impl_dir}/${component}.c"
@@ -138,11 +138,11 @@ gcc ${CFLAGS} -c -o build/crypto_utils.o include/crypto_utils.c
 
 # AES implementation
 echo "Compiling AES..."
-# Compile individual AES mode files
+# Compile individual AES mode files - Updated modes: CBC, GCM, CFB, OFB
 gcc ${CFLAGS} -c -o build/aes_gcm.o aes/aes_gcm.c
 gcc ${CFLAGS} -c -o build/aes_cbc.o aes/aes_cbc.c
-gcc ${CFLAGS} -c -o build/aes_ctr.o aes/aes_ctr.c
-gcc ${CFLAGS} -c -o build/aes_ecb.o aes/aes_ecb.c
+gcc ${CFLAGS} -c -o build/aes_cfb.o aes/aes_cfb.c
+gcc ${CFLAGS} -c -o build/aes_ofb.o aes/aes_ofb.c
 gcc ${CFLAGS} -c -o build/aes_key.o aes/aes_key.c
 # Compile main AES implementation
 gcc ${CFLAGS} -c -o build/aes_implementation.o aes/implementation.c
@@ -156,13 +156,13 @@ if ! check_implementation "camellia/implementation.c"; then
     echo "#include \"implementation.h\"" >> camellia/implementation.c
     echo "void register_camellia_implementations(implementation_registry_t* registry) {}" >> camellia/implementation.c
 else
-    # Compile individual Camellia mode files
+    # Compile individual Camellia mode files - Supported modes: CBC, CFB, OFB, ECB
     echo "Compiling Camellia components..."
     gcc ${CFLAGS} -c -o build/camellia_common.o camellia/camellia_common.c
     gcc ${CFLAGS} -c -o build/camellia_key.o camellia/camellia_key.c
-    gcc ${CFLAGS} -c -o build/camellia_gcm.o camellia/camellia_gcm.c
     gcc ${CFLAGS} -c -o build/camellia_cbc.o camellia/camellia_cbc.c
-    gcc ${CFLAGS} -c -o build/camellia_ctr.o camellia/camellia_ctr.c
+    gcc ${CFLAGS} -c -o build/camellia_cfb.o camellia/camellia_cfb.c
+    gcc ${CFLAGS} -c -o build/camellia_ofb.o camellia/camellia_ofb.c
     gcc ${CFLAGS} -c -o build/camellia_ecb.o camellia/camellia_ecb.c
 fi
 gcc ${CFLAGS} -c -o build/camellia_implementation.o camellia/implementation.c
@@ -247,15 +247,15 @@ gcc -Wall -O2 \
     build/aes_implementation.o \
     build/aes_gcm.o \
     build/aes_cbc.o \
-    build/aes_ctr.o \
-    build/aes_ecb.o \
+    build/aes_cfb.o \
+    build/aes_ofb.o \
     build/aes_key.o \
     build/camellia_implementation.o \
     $([ -f build/camellia_common.o ] && echo "build/camellia_common.o") \
     $([ -f build/camellia_key.o ] && echo "build/camellia_key.o") \
-    $([ -f build/camellia_gcm.o ] && echo "build/camellia_gcm.o") \
     $([ -f build/camellia_cbc.o ] && echo "build/camellia_cbc.o") \
-    $([ -f build/camellia_ctr.o ] && echo "build/camellia_ctr.o") \
+    $([ -f build/camellia_cfb.o ] && echo "build/camellia_cfb.o") \
+    $([ -f build/camellia_ofb.o ] && echo "build/camellia_ofb.o") \
     $([ -f build/camellia_ecb.o ] && echo "build/camellia_ecb.o") \
     build/chacha_implementation.o \
     build/rsa_implementation.o \
