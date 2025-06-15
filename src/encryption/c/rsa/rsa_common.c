@@ -1,45 +1,51 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "implementation.h"
+#include "rsa_common.h"
+
+#ifdef USE_OPENSSL
 #include <openssl/rsa.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
+#endif
 
-#include "implementation.h"
-#include "rsa_common.h"
-
-// Calculate the maximum data size that can be encrypted in one RSA block
+// calculate maximum data size that can be encrypted in one rsa block
 int rsa_get_max_data_size(rsa_context_t* context) {
     if (!context) return 0;
     
-    RSA* rsa_key = context->rsa;
-    if (!rsa_key) {
+#ifdef USE_OPENSSL
+    if (!context->rsa_keypair) {
         return 0;
     }
     
-    int rsa_size = RSA_size(rsa_key);
+    int rsa_size = RSA_size(context->rsa_keypair);
     
-    // For RSA encryption, the maximum data size depends on the padding mode
+    // maximum data size depends on padding mode
     if (context->padding_type == PADDING_OAEP) {
-        // For OAEP, the maximum is key size - 2 * hash size - 2
-        // Using SHA-1 as the hash (20 bytes)
+        // for oaep: key_size - 2 * hash_size - 2 (using sha-1, 20 bytes)
         return rsa_size - 2 * 20 - 2;
     } else {
-        // For PKCS#1 v1.5, the maximum is key size - 11
+        // for pkcs#1 v1.5: key_size - 11
         return rsa_size - 11;
     }
+#else
+    // for custom implementation, use the calculated values
+    return context->max_chunk_size;
+#endif
 }
 
-
-
-// Encrypt a block of data with RSA
+// encrypt a block of data with rsa
 int rsa_encrypt_block(rsa_context_t* context, const unsigned char* data, int data_length, unsigned char* output, RSA* key) {
-    if (!context || !data || data_length <= 0 || !output || !key) {
+    if (!context || !data || data_length <= 0 || !output) {
         return -1;
     }
     
-    // Get the maximum data size for this key and padding
+#ifdef USE_OPENSSL
+    if (!key) return -1;
+    
+    // get maximum data size for this key and padding
     int max_size = rsa_get_max_data_size(context);
     if (data_length > max_size) {
         fprintf(stderr, "Warning: Data size %d exceeds maximum for RSA encryption (%d)\n", 
@@ -47,15 +53,10 @@ int rsa_encrypt_block(rsa_context_t* context, const unsigned char* data, int dat
         data_length = max_size;
     }
     
-    // Choose padding based on context
-    int padding;
-    if (context->padding_type == PADDING_OAEP) {
-        padding = RSA_PKCS1_OAEP_PADDING;
-    } else {
-        padding = RSA_PKCS1_PADDING;
-    }
+    // choose padding based on context
+    int padding = (context->padding_type == PADDING_OAEP) ? RSA_PKCS1_OAEP_PADDING : RSA_PKCS1_PADDING;
     
-    // Encrypt the data
+    // encrypt the data
     int result = RSA_public_encrypt(data_length, data, output, key, padding);
     if (result < 0) {
         fprintf(stderr, "Error: RSA encryption failed\n");
@@ -67,28 +68,32 @@ int rsa_encrypt_block(rsa_context_t* context, const unsigned char* data, int dat
     }
     
     return result;
+#else
+    return -1; // openssl required
+#endif
 }
 
-// Decrypt a block of data with RSA
+// decrypt a block of data with rsa
 int rsa_decrypt_block(rsa_context_t* context, const unsigned char* data, int data_length, unsigned char* output, RSA* key) {
-    if (!context || !data || data_length <= 0 || !output || !key) {
+    if (!context || !data || data_length <= 0 || !output) {
         return -1;
     }
     
-    // Choose padding based on context
-    int padding;
-    if (context->padding_type == PADDING_OAEP) {
-        padding = RSA_PKCS1_OAEP_PADDING;
-    } else {
-        padding = RSA_PKCS1_PADDING;
-    }
+#ifdef USE_OPENSSL
+    if (!key) return -1;
     
-    // Decrypt the data
+    // choose padding based on context
+    int padding = (context->padding_type == PADDING_OAEP) ? RSA_PKCS1_OAEP_PADDING : RSA_PKCS1_PADDING;
+    
+    // decrypt the data
     int result = RSA_private_decrypt(data_length, data, output, key, padding);
     if (result < 0) {
-        // Don't print an error here, as we might be trying multiple keys in key reuse mode
+        // don't print error here, as we might be trying multiple keys
         return -1;
     }
     
     return result;
+#else
+    return -1; // openssl required
+#endif
 } 

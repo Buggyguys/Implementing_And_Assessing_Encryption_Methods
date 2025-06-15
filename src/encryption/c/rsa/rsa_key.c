@@ -9,11 +9,11 @@
 #include "implementation.h"
 #include "rsa_key.h"
 
-// Configure RSA key size (bits: 1024, 2048, 3072, 4096)
+// configure RSA key size (bits: 1024, 2048, 3072, 4096)
 int rsa_set_key_size(rsa_context_t* context, int key_size) {
     if (!context) return 0;
     
-    // Check if key size is valid
+    // check if key size is valid
     if (key_size != 1024 && key_size != 2048 && key_size != 3072 && key_size != 4096) {
         fprintf(stderr, "Warning: Invalid RSA key size %d (must be 1024, 2048, 3072, or 4096), defaulting to 2048\n", key_size);
         key_size = 2048;
@@ -23,7 +23,7 @@ int rsa_set_key_size(rsa_context_t* context, int key_size) {
     return 1;
 }
 
-// Configure RSA padding type (PKCS#1 v1.5 or OAEP)
+// configure RSA padding type (PKCS#1 v1.5 or OAEP)
 int rsa_set_padding(rsa_context_t* context, rsa_padding_type_t padding_type) {
     if (!context) return 0;
     
@@ -33,7 +33,7 @@ int rsa_set_padding(rsa_context_t* context, rsa_padding_type_t padding_type) {
 
 
 
-// Generate a new RSA key with specified size
+// generate a new RSA key with specified size
 RSA* rsa_generate_new_key(int key_size) {
     BIGNUM *bn = BN_new();
     if (!bn) {
@@ -41,14 +41,14 @@ RSA* rsa_generate_new_key(int key_size) {
         return NULL;
     }
     
-    // Set public exponent to 65537 (standard value)
+    // set public exponent to 65537 (standard value)
     if (BN_set_word(bn, RSA_F4) != 1) {
         fprintf(stderr, "Error: BN_set_word failed in RSA key generation\n");
         BN_free(bn);
         return NULL;
     }
     
-    // Generate new RSA key
+    // generate new RSA key
     RSA* rsa = RSA_new();
     if (!rsa) {
         fprintf(stderr, "Error: RSA_new failed in RSA key generation\n");
@@ -56,7 +56,7 @@ RSA* rsa_generate_new_key(int key_size) {
         return NULL;
     }
     
-    // Set key size
+    // set key size
     if (RSA_generate_key_ex(rsa, key_size, bn, NULL) != 1) {
         fprintf(stderr, "Error: RSA_generate_key_ex failed in RSA key generation\n");
         char* err_string = ERR_error_string(ERR_get_error(), NULL);
@@ -68,7 +68,7 @@ RSA* rsa_generate_new_key(int key_size) {
         return NULL;
     }
     
-    // Free the bn now that it's been used
+    // free the bn now that it's been used
     BN_free(bn);
     
     return rsa;
@@ -76,28 +76,28 @@ RSA* rsa_generate_new_key(int key_size) {
 
 
 
-// Export a public key in DER format
+// export a public key in DER format
 unsigned char* rsa_export_public_key(RSA* key, int* length) {
     if (!key || !length) return NULL;
     
-    // Create a memory BIO
+    // create a memory BIO
     BIO* bio = BIO_new(BIO_s_mem());
     if (!bio) {
         fprintf(stderr, "Error: Could not create BIO for RSA key export\n");
         return NULL;
     }
     
-    // Write the key in DER format
+    // write the key in DER format
     if (!i2d_RSAPublicKey_bio(bio, key)) {
         fprintf(stderr, "Error: Could not export RSA public key\n");
         BIO_free(bio);
         return NULL;
     }
     
-    // Get the buffer size
+    // get the buffer size
     *length = BIO_ctrl_pending(bio);
     
-    // Allocate memory for the buffer
+    // allocate memory for the buffer
     unsigned char* buffer = (unsigned char*)malloc(*length);
     if (!buffer) {
         fprintf(stderr, "Error: Could not allocate memory for RSA key buffer\n");
@@ -105,7 +105,7 @@ unsigned char* rsa_export_public_key(RSA* key, int* length) {
         return NULL;
     }
     
-    // Read the buffer
+    // read the buffer
     if (BIO_read(bio, buffer, *length) != *length) {
         fprintf(stderr, "Error: Could not read RSA key from BIO\n");
         free(buffer);
@@ -117,28 +117,28 @@ unsigned char* rsa_export_public_key(RSA* key, int* length) {
     return buffer;
 }
 
-// Export a private key in DER format
+// export a private key in DER format
 unsigned char* rsa_export_private_key(RSA* key, int* length) {
     if (!key || !length) return NULL;
     
-    // Create a memory BIO
+    // create a memory BIO
     BIO* bio = BIO_new(BIO_s_mem());
     if (!bio) {
         fprintf(stderr, "Error: Could not create BIO for RSA key export\n");
         return NULL;
     }
     
-    // Write the key in DER format
+    // write the key in DER format
     if (!i2d_RSAPrivateKey_bio(bio, key)) {
         fprintf(stderr, "Error: Could not export RSA private key\n");
         BIO_free(bio);
         return NULL;
     }
     
-    // Get the buffer size
+    // get the buffer size
     *length = BIO_ctrl_pending(bio);
     
-    // Allocate memory for the buffer
+    // allocate memory for the buffer
     unsigned char* buffer = (unsigned char*)malloc(*length);
     if (!buffer) {
         fprintf(stderr, "Error: Could not allocate memory for RSA key buffer\n");
@@ -146,7 +146,7 @@ unsigned char* rsa_export_private_key(RSA* key, int* length) {
         return NULL;
     }
     
-    // Read the buffer
+    // read the buffer
     if (BIO_read(bio, buffer, *length) != *length) {
         fprintf(stderr, "Error: Could not read RSA key from BIO\n");
         free(buffer);
@@ -158,21 +158,21 @@ unsigned char* rsa_export_private_key(RSA* key, int* length) {
     return buffer;
 }
 
-// Import a public key from DER format
+// import a public key from DER format
 RSA* rsa_import_public_key(const unsigned char* data, int length) {
     if (!data || length <= 0) {
         fprintf(stderr, "Error: Invalid data for RSA public key import\n");
         return NULL;
     }
     
-    // Create a memory BIO
+    // create a memory BIO
     BIO* bio = BIO_new_mem_buf((void*)data, length);
     if (!bio) {
         fprintf(stderr, "Error: Could not create BIO for RSA key import\n");
         return NULL;
     }
     
-    // Read the key from DER format
+    // read the key from DER format
     RSA* key = d2i_RSAPublicKey_bio(bio, NULL);
     if (!key) {
         unsigned long err = ERR_get_error();
@@ -180,7 +180,7 @@ RSA* rsa_import_public_key(const unsigned char* data, int length) {
         ERR_error_string_n(err, err_buf, sizeof(err_buf));
         fprintf(stderr, "Error: Could not import RSA public key: %s\n", err_buf);
         
-        // Try PKCS#1 format as fallback
+        // try PKCS#1 format as fallback
         BIO_reset(bio);
         key = d2i_RSA_PUBKEY_bio(bio, NULL);
         if (!key) {
@@ -196,21 +196,21 @@ RSA* rsa_import_public_key(const unsigned char* data, int length) {
     return key;
 }
 
-// Import a private key from DER format
+// import a private key from DER format
 RSA* rsa_import_private_key(const unsigned char* data, int length) {
     if (!data || length <= 0) {
         fprintf(stderr, "Error: Invalid data for RSA private key import\n");
         return NULL;
     }
     
-    // Create a memory BIO
+    // create a memory BIO
     BIO* bio = BIO_new_mem_buf((void*)data, length);
     if (!bio) {
         fprintf(stderr, "Error: Could not create BIO for RSA key import\n");
         return NULL;
     }
     
-    // Read the key from DER format
+    // read the key from DER format
     RSA* key = d2i_RSAPrivateKey_bio(bio, NULL);
     if (!key) {
         unsigned long err = ERR_get_error();
