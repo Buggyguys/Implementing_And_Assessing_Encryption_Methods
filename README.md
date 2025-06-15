@@ -1,7 +1,3 @@
-# CryptoBench Pro
-
-A comprehensive benchmarking tool for cryptographic algorithms across multiple programming languages.
-
 ## Overview
 
 CryptoBench Pro allows you to benchmark various encryption algorithms implemented in different programming languages. The tool tracks detailed performance metrics including CPU usage, memory consumption, and disk I/O, providing a comprehensive analysis of encryption performance.
@@ -76,10 +72,6 @@ When a test is started, the following happens:
 4. Each language core benchmarks the selected encryption methods
 5. Results are saved in the session folder for analysis
 
-## Adding New Implementations
-
-See the [Encryption README](src/encryption/README.md) for instructions on adding new encryption implementations or languages.
-
 ## Metrics Tracked
 
 The system tracks the following metrics:
@@ -105,11 +97,3 @@ The system tracks the following metrics:
 - Disk I/O
 - Context switches
 - Correctness verification
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
