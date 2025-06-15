@@ -435,18 +435,16 @@ class ResultsTab(QWidget):
                 self.results_table.setItem(row, 1, QTableWidgetItem(display_algo_name))
                 self.results_table.setItem(row, 2, QTableWidgetItem(impl_type))
                 
-                enc_time = metrics.get("avg_encrypt_wall_time_ms", 0)
-                dec_time = metrics.get("avg_decrypt_wall_time_ms", 0)
-                keygen_time = metrics.get("avg_keygen_wall_time_ms", 0)
+                # Convert from seconds to milliseconds
+                enc_time = metrics.get("avg_encrypt_time_s", 0) * 1000
+                dec_time = metrics.get("avg_decrypt_time_s", 0) * 1000  
+                keygen_time = metrics.get("avg_keygen_time_s", 0) * 1000
                 
                 # Throughput: Prefer MB/s, convert from BPS if necessary
                 throughput_mb_s = metrics.get("avg_throughput_encrypt_mb_per_s")
                 if throughput_mb_s is None:
-                    throughput_bps = metrics.get("avg_encrypt_throughput_bps")
-                    if throughput_bps is not None:
-                        throughput_mb_s = throughput_bps / (8 * 1024 * 1024)
-                    else:
-                        throughput_mb_s = 0
+                    speed_bps = metrics.get("avg_encrypt_throughput_bps")
+                    throughput_mb_s = speed_bps / (1024 * 1024) if speed_bps is not None else 0
 
                 self.results_table.setItem(row, 3, QTableWidgetItem(f"{enc_time:.2f}"))
                 self.results_table.setItem(row, 4, QTableWidgetItem(f"{dec_time:.2f}"))
@@ -515,11 +513,8 @@ class ResultsTab(QWidget):
             
             throughput_mb_s = metrics.get("avg_throughput_encrypt_mb_per_s")
             if throughput_mb_s is None:
-                throughput_bps = metrics.get("avg_encrypt_throughput_bps")
-                if throughput_bps is not None:
-                    throughput_mb_s = throughput_bps / (8 * 1024 * 1024)
-                else:
-                    throughput_mb_s = 0
+                speed_bps = metrics.get("avg_encrypt_throughput_bps")
+                throughput_mb_s = speed_bps / (1024 * 1024) if speed_bps is not None else 0
             
             self.results_table.setItem(row, 3, QTableWidgetItem(f"{enc_time:.2f}"))
             self.results_table.setItem(row, 4, QTableWidgetItem(f"{dec_time:.2f}"))
@@ -581,12 +576,13 @@ class ResultsTab(QWidget):
                     self.results_table.setItem(row, 0, QTableWidgetItem(language.capitalize()))
                     self.results_table.setItem(row, 1, QTableWidgetItem(display_algo_name))
 
-                    self_enc_time = custom_metrics.get("avg_encrypt_wall_time_ms", 0)
-                    lib_enc_time = stdlib_metrics.get("avg_encrypt_wall_time_ms", 0)
-                    self_dec_time = custom_metrics.get("avg_decrypt_wall_time_ms", 0)
-                    lib_dec_time = stdlib_metrics.get("avg_decrypt_wall_time_ms", 0)
-                    self_keygen_time = custom_metrics.get("avg_keygen_wall_time_ms", 0)
-                    lib_keygen_time = stdlib_metrics.get("avg_keygen_wall_time_ms", 0)
+                    # Convert from seconds to milliseconds
+                    self_enc_time = custom_metrics.get("avg_encrypt_time_s", 0) * 1000
+                    lib_enc_time = stdlib_metrics.get("avg_encrypt_time_s", 0) * 1000
+                    self_dec_time = custom_metrics.get("avg_decrypt_time_s", 0) * 1000
+                    lib_dec_time = stdlib_metrics.get("avg_decrypt_time_s", 0) * 1000
+                    self_keygen_time = custom_metrics.get("avg_keygen_time_s", 0) * 1000
+                    lib_keygen_time = stdlib_metrics.get("avg_keygen_time_s", 0) * 1000
 
                     enc_ratio = f"{self_enc_time / lib_enc_time:.2f}x" if lib_enc_time else "N/A"
                     dec_ratio = f"{self_dec_time / lib_dec_time:.2f}x" if lib_dec_time else "N/A"
@@ -661,7 +657,7 @@ class ResultsTab(QWidget):
                 speed_mb_s = metrics.get("avg_throughput_encrypt_mb_per_s")
                 if speed_mb_s is None:
                     speed_bps = metrics.get("avg_encrypt_throughput_bps")
-                    speed_mb_s = speed_bps / (8 * 1024 * 1024) if speed_bps is not None else 0
+                    speed_mb_s = speed_bps / (1024 * 1024) if speed_bps is not None else 0
                 if "_custom" in algo_key: grouped_algos[base_algo]["custom"] = speed_mb_s
                 else: grouped_algos[base_algo]["stdlib"] = speed_mb_s
                 grouped_algos[base_algo]["config"] = algo_data.get("configuration", {}) # Store for display name
@@ -779,7 +775,7 @@ class ResultsTab(QWidget):
                 speed_mb_s = metrics.get("avg_throughput_decrypt_mb_per_s")
                 if speed_mb_s is None:
                     speed_bps = metrics.get("avg_decrypt_throughput_bps")
-                    speed_mb_s = speed_bps / (8 * 1024 * 1024) if speed_bps is not None else 0
+                    speed_mb_s = speed_bps / (1024 * 1024) if speed_bps is not None else 0
                 if "_custom" in algo_key: grouped_algos[base_algo]["custom"] = speed_mb_s
                 else: grouped_algos[base_algo]["stdlib"] = speed_mb_s
                 grouped_algos[base_algo]["config"] = algo_data.get("configuration", {})
@@ -883,7 +879,8 @@ class ResultsTab(QWidget):
                     grouped_algos[base_algo] = {}
 
                 metrics = algo_data.get("aggregated_metrics", {})
-                time_ms = metrics.get("avg_keygen_wall_time_ms", 0)
+                # Convert from seconds to milliseconds
+                time_ms = metrics.get("avg_keygen_time_s", 0) * 1000
 
                 if "_custom" in algo_key:
                     grouped_algos[base_algo]["custom"] = time_ms
@@ -1011,9 +1008,9 @@ class ResultsTab(QWidget):
                 if base_algo not in grouped_algos: grouped_algos[base_algo] = {}
                 metrics = algo_data.get("aggregated_metrics", {})
                 mem_info = {
-                    "keygen": metrics.get("avg_keygen_peak_rss_mb", 0),
-                    "encrypt": metrics.get("avg_encrypt_peak_rss_mb", 0),
-                    "decrypt": metrics.get("avg_decrypt_peak_rss_mb", 0)
+                    "keygen": metrics.get("avg_keygen_peak_memory_mb", 0),
+                    "encrypt": metrics.get("avg_encrypt_peak_memory_mb", 0),
+                    "decrypt": metrics.get("avg_decrypt_peak_memory_mb", 0)
                 }
                 if "_custom" in algo_key:
                     grouped_algos[base_algo]["custom"] = mem_info
@@ -1206,8 +1203,8 @@ class ResultsTab(QWidget):
                 label = f"{lang_name.capitalize()} {display_algo_name} ({impl_type.capitalize()})"
                 
                 # Get CPU usage data for this algorithm
-                encrypt_cpu = metrics.get("avg_encrypt_cpu_percentage", 0)
-                decrypt_cpu = metrics.get("avg_decrypt_cpu_percentage", 0)
+                encrypt_cpu = metrics.get("avg_encrypt_cpu_percent", 0)
+                decrypt_cpu = metrics.get("avg_decrypt_cpu_percent", 0)
                 
                 algorithms.append(label)
                 cpu_data.append([encrypt_cpu, decrypt_cpu])
@@ -1433,9 +1430,12 @@ class ResultsTab(QWidget):
                 if base_algo not in grouped_algos: grouped_algos[base_algo] = {}
                 metrics = algo_data.get("aggregated_metrics", {})
                 cs_info = {
-                    "keygen": metrics.get("avg_keygen_ctx_switches_total", 0),
-                    "encrypt": metrics.get("avg_encrypt_ctx_switches_total", 0),
-                    "decrypt": metrics.get("avg_decrypt_ctx_switches_total", 0)
+                    "keygen": (metrics.get("keygen_ctx_switches_voluntary", 0) + 
+                              metrics.get("keygen_ctx_switches_involuntary", 0)),
+                    "encrypt": (metrics.get("encrypt_ctx_switches_voluntary", 0) + 
+                               metrics.get("encrypt_ctx_switches_involuntary", 0)),
+                    "decrypt": (metrics.get("decrypt_ctx_switches_voluntary", 0) + 
+                               metrics.get("decrypt_ctx_switches_involuntary", 0))
                 }
                 if "_custom" in algo_key:
                     grouped_algos[base_algo]["custom"] = cs_info
@@ -1592,10 +1592,13 @@ class ResultsTab(QWidget):
 
                     label = f"{lang_name.capitalize()}\\n{display_algo_name}"
                     
-                    self_enc_time = custom_m.get("avg_encrypt_wall_time_ms", 0)
-                    lib_enc_time = stdlib_m.get("avg_encrypt_wall_time_ms", 0)
-                    self_dec_time = custom_m.get("avg_decrypt_wall_time_ms", 0)
-                    lib_dec_time = stdlib_m.get("avg_decrypt_wall_time_ms", 0)
+                    # Convert from seconds to milliseconds
+                    self_enc_time = custom_m.get("avg_encrypt_time_s", 0) * 1000
+                    lib_enc_time = stdlib_m.get("avg_encrypt_time_s", 0) * 1000
+                    self_dec_time = custom_m.get("avg_decrypt_time_s", 0) * 1000
+                    lib_dec_time = stdlib_m.get("avg_decrypt_time_s", 0) * 1000
+                    self_keygen_time = custom_m.get("avg_keygen_time_s", 0) * 1000
+                    lib_keygen_time = stdlib_m.get("avg_keygen_time_s", 0) * 1000
 
                     enc_ratio = (self_enc_time / lib_enc_time) if lib_enc_time and self_enc_time else 0
                     dec_ratio = (self_dec_time / lib_dec_time) if lib_dec_time and self_dec_time else 0
