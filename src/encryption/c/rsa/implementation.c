@@ -239,9 +239,9 @@ unsigned char* rsa_encrypt(void* context, const unsigned char* data, size_t data
         rsa_context->public_key = (unsigned char*)malloc(rsa_context->public_key_length);
         if (!rsa_context->public_key) {
             fprintf(stderr, "Error: Could not allocate memory for RSA public key\n");
-            return NULL;
-        }
-        
+        return NULL;
+    }
+    
         memcpy(rsa_context->public_key, key, rsa_context->public_key_length);
     }
     

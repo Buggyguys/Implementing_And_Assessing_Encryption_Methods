@@ -1100,19 +1100,19 @@ void run_benchmarks(TestConfig* config) {
             // Clean up
             printf("    [DEBUG] Cleaning up decrypted data\n");
             if (decrypted) {
-                free(decrypted);
+            free(decrypted);
                 decrypted = NULL;
             }
             
             printf("    [DEBUG] Cleaning up ciphertext\n");
             if (ciphertext) {
-                free(ciphertext);
+            free(ciphertext);
                 ciphertext = NULL;
             }
             
             printf("    [DEBUG] Cleaning up key\n");
             if (key) {
-                free(key);
+            free(key);
                 key = NULL;
             }
             

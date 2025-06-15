@@ -82,7 +82,7 @@ static inline int crypto_random_bytes(unsigned char* buffer, size_t size) {
  */
 static inline void* crypto_secure_alloc(size_t size) {
     if (size == 0) return NULL;
-    
+
     printf("    [DEBUG] Attempting to allocate %zu bytes (%.2f MB)\n", 
            size, (double)size / (1024.0 * 1024.0));
 
@@ -102,7 +102,7 @@ static inline void* crypto_secure_alloc(size_t size) {
     } else {
         printf("    [DEBUG] Allocation successful, zeroing memory...\n");
     }
-    memset(ptr, 0, size);
+        memset(ptr, 0, size);
     return ptr;
 #endif
 }

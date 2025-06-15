@@ -5,322 +5,122 @@
 #include "../include/crypto_utils.h"
 #include "camellia_common.h"
 #include "camellia_ecb.h"
+#include "implementation.h"
 
 #define AUTH_TAG_SIZE 16 // 16 bytes (128 bits) for authentication tag
+#define CAMELLIA_BLOCK_SIZE 16
 
-// Camellia-ECB encryption function with authentication
-unsigned char* camellia_ecb_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    if (!context || !data || data_length <= 0) return NULL;
+// forward declarations for internal functions
+extern void camellia_encrypt_128(const uint8_t* input, uint8_t* output, const uint64_t subkeys[26]);
+extern void camellia_decrypt_128(const uint8_t* input, uint8_t* output, const uint64_t subkeys[26]);
+extern void camellia_key_schedule_128(const uint8_t* key, uint64_t subkeys[26]);
+
+// ecb encryption function
+unsigned char* camellia_ecb_encrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
     
-    // Calculate the output length (data + padding + tag)
-    // In ECB mode, we need to pad the data to a multiple of the block size
-    int block_size = CAMELLIA_BLOCK_SIZE;
-    int padded_length = ((data_length + block_size - 1) / block_size) * block_size;
+    // set mode to ecb
+    strcpy(context->mode, "ECB");
     
-    // Calculate tag size
-    int tag_size = AUTH_TAG_SIZE;
-    
-    // Total output = padded data + tag (no IV in ECB mode)
-    *output_length = padded_length + tag_size;
-    
-    // Allocate memory for the output using secure allocation
-    unsigned char* output = (unsigned char*)crypto_secure_alloc(*output_length);
-    if (!output) {
-        fprintf(stderr, "Error: Could not allocate memory for Camellia-ECB encryption output\n");
-        return NULL;
+    // use main implementation functions
+    if (context->is_custom) {
+        return camellia_custom_encrypt(context, data, data_length, context->key, output_length);
+    } else {
+        return camellia_encrypt(context, data, data_length, context->key, output_length);
     }
-    
-    // Structure of output: Ciphertext + Tag (no IV in ECB)
-    
-    // ECB mode: each block is encrypted independently
-    for (int i = 0; i < data_length; i++) {
-        // Simple block-based encryption with key mixing
-        unsigned char block_key = context->key[i % context->key_length];
-        
-        // Position-dependent key mixing
-        block_key ^= (unsigned char)(i & 0xFF);
-        block_key = ((block_key << 1) | (block_key >> 7)) ^ context->key[(i * 3) % context->key_length];
-        
-        // Block position within the current 16-byte block
-        int block_pos = i % CAMELLIA_BLOCK_SIZE;
-        block_key ^= context->key[(block_pos * 5) % context->key_length];
-        
-        // Encrypt data with position-dependent key
-        output[i] = data[i] ^ block_key;
-    }
-    
-    // Pad the remaining bytes (if any)
-    for (int i = data_length; i < padded_length; i++) {
-        unsigned char padding_byte = padded_length - data_length;
-        
-        // Apply same encryption logic to padding
-        unsigned char block_key = context->key[i % context->key_length];
-        block_key ^= (unsigned char)(i & 0xFF);
-        block_key = ((block_key << 1) | (block_key >> 7)) ^ context->key[(i * 3) % context->key_length];
-        
-        int block_pos = i % CAMELLIA_BLOCK_SIZE;
-        block_key ^= context->key[(block_pos * 5) % context->key_length];
-        
-        output[i] = padding_byte ^ block_key;
-    }
-    
-    // Generate authentication tag for the encrypted data
-    unsigned char* ciphertext = output;
-    unsigned char* tag = output + padded_length;
-    
-    if (!crypto_generate_authentication_tag(tag, tag_size, ciphertext, padded_length, 
-                                           context->key, context->key_length)) {
-        fprintf(stderr, "Error: Failed to generate authentication tag\n");
-        crypto_secure_free(output, *output_length);
-        return NULL;
-    }
-    
-    return output;
 }
 
-// Camellia-ECB decryption function with authentication verification
-unsigned char* camellia_ecb_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    if (!context || !data || data_length <= 0) return NULL;
+// ecb decryption function
+unsigned char* camellia_ecb_decrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
     
-    // Calculate tag size
-    int tag_size = AUTH_TAG_SIZE;
+    // set mode to ecb
+    strcpy(context->mode, "ECB");
     
-    // Check if the data is large enough to contain the tag
-    if (data_length < tag_size) {
-        fprintf(stderr, "Error: Invalid Camellia-ECB ciphertext length\n");
+    // use main implementation functions
+    if (context->is_custom) {
+        return camellia_custom_decrypt(context, data, data_length, context->key, output_length);
+    } else {
+        return camellia_decrypt(context, data, data_length, context->key, output_length);
+    }
+}
+
+// custom ecb encryption function using real block cipher
+unsigned char* camellia_ecb_custom_encrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
+    
+    // only support 128-bit keys for custom implementation
+    if (context->key_size != 128) {
+        fprintf(stderr, "Custom ECB: Only 128-bit keys supported\n");
         return NULL;
     }
     
-    // Calculate the padded length
-    int padded_length = data_length - tag_size;
+    // generate subkeys
+    uint64_t subkeys[26];
+    camellia_key_schedule_128(context->key, subkeys);
     
-    // Allocate memory for the plaintext using secure allocation
-    unsigned char* plaintext = (unsigned char*)crypto_secure_alloc(padded_length);
-    if (!plaintext) {
-        fprintf(stderr, "Error: Could not allocate memory for Camellia-ECB decryption output\n");
-        return NULL;
-    }
+    // calculate output size (padded to 16-byte blocks)
+    size_t padded_length = ((data_length + 15) / 16) * 16;
+    unsigned char* output = (unsigned char*)malloc(padded_length);
+    if (!output) return NULL;
     
-    // Extract the ciphertext and tag from the input data
-    const unsigned char* ciphertext = data;
-    const unsigned char* tag = data + padded_length;
-    
-    // Verify the authentication tag first
-    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, padded_length, 
-                                        context->key, context->key_length)) {
-        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
-        crypto_secure_free(plaintext, padded_length);
-        return NULL; // Fail securely on authentication failure
-    }
-    
-    // ECB mode decryption: each block is decrypted independently
-    for (int i = 0; i < padded_length; i++) {
-        // Same key mixing as encryption
-        unsigned char block_key = context->key[i % context->key_length];
+    // encrypt block by block
+    for (size_t i = 0; i < data_length; i += 16) {
+        uint8_t block[16];
+        memset(block, 0, 16);
         
-        // Position-dependent key mixing
-        block_key ^= (unsigned char)(i & 0xFF);
-        block_key = ((block_key << 1) | (block_key >> 7)) ^ context->key[(i * 3) % context->key_length];
+        size_t copy_len = (data_length - i < 16) ? data_length - i : 16;
+        memcpy(block, data + i, copy_len);
         
-        // Block position within the current 16-byte block
-        int block_pos = i % CAMELLIA_BLOCK_SIZE;
-        block_key ^= context->key[(block_pos * 5) % context->key_length];
-        
-        // Decrypt data with position-dependent key
-        plaintext[i] = ciphertext[i] ^ block_key;
-    }
-    
-    // Check for and remove padding
-    unsigned char padding_byte = plaintext[padded_length - 1];
-    if (padding_byte > 0 && padding_byte <= CAMELLIA_BLOCK_SIZE) {
-        // Verify padding
-        int valid_padding = 1;
-        for (int i = padded_length - padding_byte; i < padded_length; i++) {
-            if (plaintext[i] != padding_byte) {
-                valid_padding = 0;
-                break;
+        // pkcs#7 padding for last block
+        if (copy_len < 16) {
+            uint8_t pad_value = 16 - copy_len;
+            for (size_t j = copy_len; j < 16; j++) {
+                block[j] = pad_value;
             }
         }
         
-        if (valid_padding) {
-            padded_length -= padding_byte;
-        }
+        // encrypt the block
+        camellia_encrypt_128(block, output + i, subkeys);
     }
     
     *output_length = padded_length;
-    
-    return plaintext;
-}
-
-// Custom Camellia-ECB encryption function with enhanced block processing
-unsigned char* camellia_ecb_custom_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    if (!context || !data || data_length <= 0) return NULL;
-    
-    // Calculate the output length (data + padding + tag)
-    int block_size = CAMELLIA_BLOCK_SIZE;
-    int padded_length = ((data_length + block_size - 1) / block_size) * block_size;
-    
-    // Calculate tag size
-    int tag_size = AUTH_TAG_SIZE;
-    
-    // Total output = padded data + tag (no IV in ECB mode)
-    *output_length = padded_length + tag_size;
-    
-    // Allocate memory for the output using secure allocation
-    unsigned char* output = (unsigned char*)crypto_secure_alloc(*output_length);
-    if (!output) {
-        fprintf(stderr, "Error: Could not allocate memory for Camellia-ECB custom encryption output\n");
-        return NULL;
-    }
-    
-    // Structure of output: Ciphertext + Tag (no IV in ECB)
-    
-    // Enhanced key mixing for custom variant
-    unsigned char mixed_key[64];
-    for (int i = 0; i < 64; i++) {
-        mixed_key[i] = context->key[i % context->key_length] ^ context->key[(i + 13) % context->key_length];
-        mixed_key[i] = ((mixed_key[i] << 4) | (mixed_key[i] >> 4)) ^ (unsigned char)(i * 11);
-        mixed_key[i] ^= context->key[(i * 7) % context->key_length];
-    }
-    
-    // Custom ECB mode: enhanced block-based encryption
-    for (int i = 0; i < data_length; i++) {
-        // Enhanced block-based encryption with multiple key layers
-        unsigned char block_key = mixed_key[i % 64];
-        
-        // Multi-layer position-dependent mixing
-        block_key ^= (unsigned char)((i * 23) & 0xFF);
-        block_key = ((block_key << 3) | (block_key >> 5)) ^ context->key[(i * 17) % context->key_length];
-        
-        // Block position within the current 16-byte block with enhanced mixing
-        int block_pos = i % CAMELLIA_BLOCK_SIZE;
-        block_key ^= mixed_key[(block_pos * 11) % 64];
-        
-        // Additional layer with cross-block influence
-        int block_number = i / CAMELLIA_BLOCK_SIZE;
-        block_key ^= (unsigned char)((block_number * 19) & 0xFF);
-        block_key = ((block_key << 2) | (block_key >> 6)) ^ mixed_key[(block_number * 7) % 64];
-        
-        // Encrypt data with enhanced multi-layer key
-        output[i] = data[i] ^ block_key;
-    }
-    
-    // Pad the remaining bytes with enhanced padding
-    for (int i = data_length; i < padded_length; i++) {
-        unsigned char padding_byte = padded_length - data_length;
-        
-        // Apply same enhanced encryption logic to padding
-        unsigned char block_key = mixed_key[i % 64];
-        block_key ^= (unsigned char)((i * 23) & 0xFF);
-        block_key = ((block_key << 3) | (block_key >> 5)) ^ context->key[(i * 17) % context->key_length];
-        
-        int block_pos = i % CAMELLIA_BLOCK_SIZE;
-        block_key ^= mixed_key[(block_pos * 11) % 64];
-        
-        int block_number = i / CAMELLIA_BLOCK_SIZE;
-        block_key ^= (unsigned char)((block_number * 19) & 0xFF);
-        block_key = ((block_key << 2) | (block_key >> 6)) ^ mixed_key[(block_number * 7) % 64];
-        
-        output[i] = padding_byte ^ block_key;
-    }
-    
-    // Generate authentication tag for the encrypted data
-    unsigned char* ciphertext = output;
-    unsigned char* tag = output + padded_length;
-    
-    if (!crypto_generate_authentication_tag(tag, tag_size, ciphertext, padded_length, 
-                                           context->key, context->key_length)) {
-        fprintf(stderr, "Error: Failed to generate authentication tag\n");
-        crypto_secure_free(output, *output_length);
-        return NULL;
-    }
-    
     return output;
 }
 
-// Custom Camellia-ECB decryption function
-unsigned char* camellia_ecb_custom_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    if (!context || !data || data_length <= 0) return NULL;
+// custom ecb decryption function using real block cipher
+unsigned char* camellia_ecb_custom_decrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0 || data_length % 16 != 0) return NULL;
     
-    // Calculate tag size
-    int tag_size = AUTH_TAG_SIZE;
-    
-    // Check if the data is large enough to contain the tag
-    if (data_length < tag_size) {
-        fprintf(stderr, "Error: Invalid Camellia-ECB ciphertext length\n");
+    // only support 128-bit keys for custom implementation
+    if (context->key_size != 128) {
+        fprintf(stderr, "Custom ECB: Only 128-bit keys supported\n");
         return NULL;
     }
     
-    // Calculate the padded length
-    int padded_length = data_length - tag_size;
+    // generate subkeys
+    uint64_t subkeys[26];
+    camellia_key_schedule_128(context->key, subkeys);
     
-    // Allocate memory for the plaintext using secure allocation
-    unsigned char* plaintext = (unsigned char*)crypto_secure_alloc(padded_length);
-    if (!plaintext) {
-        fprintf(stderr, "Error: Could not allocate memory for Camellia-ECB custom decryption output\n");
-        return NULL;
+    unsigned char* output = (unsigned char*)malloc(data_length);
+    if (!output) return NULL;
+    
+    // decrypt block by block
+    for (size_t i = 0; i < data_length; i += 16) {
+        camellia_decrypt_128(data + i, output + i, subkeys);
     }
     
-    // Extract the ciphertext and tag from the input data
-    const unsigned char* ciphertext = data;
-    const unsigned char* tag = data + padded_length;
-    
-    // Verify the authentication tag first
-    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, padded_length, 
-                                        context->key, context->key_length)) {
-        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
-        crypto_secure_free(plaintext, padded_length);
-        return NULL; // Fail securely on authentication failure
-    }
-    
-    // Enhanced key mixing for custom variant (same as encryption)
-    unsigned char mixed_key[64];
-    for (int i = 0; i < 64; i++) {
-        mixed_key[i] = context->key[i % context->key_length] ^ context->key[(i + 13) % context->key_length];
-        mixed_key[i] = ((mixed_key[i] << 4) | (mixed_key[i] >> 4)) ^ (unsigned char)(i * 11);
-        mixed_key[i] ^= context->key[(i * 7) % context->key_length];
-    }
-    
-    // Custom ECB mode decryption (same process as encryption)
-    for (int i = 0; i < padded_length; i++) {
-        // Enhanced block-based decryption (same as encryption)
-        unsigned char block_key = mixed_key[i % 64];
-        
-        // Multi-layer position-dependent mixing
-        block_key ^= (unsigned char)((i * 23) & 0xFF);
-        block_key = ((block_key << 3) | (block_key >> 5)) ^ context->key[(i * 17) % context->key_length];
-        
-        // Block position within the current 16-byte block with enhanced mixing
-        int block_pos = i % CAMELLIA_BLOCK_SIZE;
-        block_key ^= mixed_key[(block_pos * 11) % 64];
-        
-        // Additional layer with cross-block influence
-        int block_number = i / CAMELLIA_BLOCK_SIZE;
-        block_key ^= (unsigned char)((block_number * 19) & 0xFF);
-        block_key = ((block_key << 2) | (block_key >> 6)) ^ mixed_key[(block_number * 7) % 64];
-        
-        // Decrypt data with enhanced multi-layer key
-        plaintext[i] = ciphertext[i] ^ block_key;
-    }
-    
-    // Check for and remove padding
-    unsigned char padding_byte = plaintext[padded_length - 1];
-    if (padding_byte > 0 && padding_byte <= CAMELLIA_BLOCK_SIZE) {
-        // Verify padding
-        int valid_padding = 1;
-        for (int i = padded_length - padding_byte; i < padded_length; i++) {
-            if (plaintext[i] != padding_byte) {
-                valid_padding = 0;
-                break;
-            }
+    // remove pkcs#7 padding
+    if (data_length > 0) {
+        uint8_t pad_value = output[data_length - 1];
+        if (pad_value <= 16) {
+            *output_length = data_length - pad_value;
+        } else {
+            *output_length = data_length;
         }
-        
-        if (valid_padding) {
-            padded_length -= padding_byte;
-        }
+    } else {
+        *output_length = 0;
     }
     
-    *output_length = padded_length;
-    
-    return plaintext;
+    return output;
 } 

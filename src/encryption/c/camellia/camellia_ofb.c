@@ -5,11 +5,147 @@
 #include "../include/crypto_utils.h"
 #include "camellia_common.h"
 #include "camellia_ofb.h"
+#include "implementation.h"
 
 #define AUTH_TAG_SIZE 16 // 16 bytes (128 bits) for authentication tag
+#define CAMELLIA_BLOCK_SIZE 16
+
+// Forward declarations for internal Camellia functions
+extern void camellia_encrypt_128(const uint8_t* input, uint8_t* output, const uint64_t subkeys[26]);
+extern void camellia_decrypt_128(const uint8_t* input, uint8_t* output, const uint64_t subkeys[26]);
+extern void camellia_key_schedule_128(const uint8_t* key, uint64_t subkeys[26]);
+
+// Camellia-OFB encryption function
+unsigned char* camellia_ofb_encrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
+    
+    // Set mode to OFB
+    strcpy(context->mode, "OFB");
+    
+    // Use the main implementation functions
+    if (context->is_custom) {
+        return camellia_custom_encrypt(context, data, data_length, context->key, output_length);
+    } else {
+        return camellia_encrypt(context, data, data_length, context->key, output_length);
+    }
+}
+
+// Camellia-OFB decryption function
+unsigned char* camellia_ofb_decrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
+    
+    // Set mode to OFB
+    strcpy(context->mode, "OFB");
+    
+    // Use the main implementation functions
+    if (context->is_custom) {
+        return camellia_custom_decrypt(context, data, data_length, context->key, output_length);
+    } else {
+        return camellia_decrypt(context, data, data_length, context->key, output_length);
+    }
+}
+
+// Custom Camellia-OFB encryption function using real block cipher
+unsigned char* camellia_ofb_custom_encrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
+    
+    // Only support 128-bit keys for custom implementation
+    if (context->key_size != 128) {
+        fprintf(stderr, "Custom Camellia OFB: Only 128-bit keys supported\n");
+        return NULL;
+    }
+    
+    // Generate subkeys
+    uint64_t subkeys[26];
+    camellia_key_schedule_128(context->key, subkeys);
+    
+    // Generate IV if not present
+    if (!context->iv) {
+        context->iv_length = 16;
+        context->iv = (unsigned char*)malloc(16);
+        if (!context->iv) return NULL;
+        
+        // Generate random IV
+        for (int i = 0; i < 16; i++) {
+            context->iv[i] = rand() & 0xFF;
+        }
+    }
+    
+    size_t total_length = 16 + data_length;
+    unsigned char* output = (unsigned char*)malloc(total_length);
+    if (!output) return NULL;
+    
+    // Copy IV to output
+    memcpy(output, context->iv, 16);
+    
+    // Feedback register starts with IV
+    uint8_t feedback[16];
+    memcpy(feedback, context->iv, 16);
+    
+    // Encrypt byte by byte using real Camellia (OFB mode)
+    for (size_t i = 0; i < data_length; i++) {
+        // Encrypt feedback to create keystream using real Camellia
+        uint8_t keystream[16];
+        camellia_encrypt_128(feedback, keystream, subkeys);
+        
+        // XOR plaintext with keystream
+        output[16 + i] = data[i] ^ keystream[0];
+        
+        // Update feedback with encrypted feedback (OFB characteristic)
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = keystream[0];
+    }
+    
+    *output_length = total_length;
+    return output;
+}
+
+// Custom Camellia-OFB decryption function using real block cipher
+unsigned char* camellia_ofb_custom_decrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length < 16) return NULL;
+    
+    // Only support 128-bit keys for custom implementation
+    if (context->key_size != 128) {
+        fprintf(stderr, "Custom Camellia OFB: Only 128-bit keys supported\n");
+        return NULL;
+    }
+    
+    // Generate subkeys
+    uint64_t subkeys[26];
+    camellia_key_schedule_128(context->key, subkeys);
+    
+    // Extract IV
+    uint8_t iv[16];
+    memcpy(iv, data, 16);
+    
+    size_t ciphertext_length = data_length - 16;
+    unsigned char* output = (unsigned char*)malloc(ciphertext_length);
+    if (!output) return NULL;
+    
+    // Feedback register starts with IV
+    uint8_t feedback[16];
+    memcpy(feedback, iv, 16);
+    
+    // Decrypt byte by byte using real Camellia (OFB mode - same as encryption)
+    for (size_t i = 0; i < ciphertext_length; i++) {
+        // Encrypt feedback to create keystream using real Camellia
+        uint8_t keystream[16];
+        camellia_encrypt_128(feedback, keystream, subkeys);
+        
+        // XOR ciphertext with keystream
+        output[i] = data[16 + i] ^ keystream[0];
+        
+        // Update feedback with encrypted feedback (OFB characteristic)
+        memmove(feedback, feedback + 1, 15);
+        feedback[15] = keystream[0];
+    }
+    
+    *output_length = ciphertext_length;
+    return output;
+}
 
 // Camellia-OFB encryption function with authentication
-unsigned char* camellia_ofb_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* camellia_ofb_encrypt_auth(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Set standard IV size if not already set
@@ -80,7 +216,7 @@ unsigned char* camellia_ofb_encrypt(camellia_context_t* context, const unsigned 
 }
 
 // Camellia-OFB decryption function with authentication verification
-unsigned char* camellia_ofb_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* camellia_ofb_decrypt_auth(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Set standard IV size if not already set
@@ -146,7 +282,7 @@ unsigned char* camellia_ofb_decrypt(camellia_context_t* context, const unsigned 
 }
 
 // Custom Camellia-OFB encryption function with enhanced keystream generation
-unsigned char* camellia_ofb_custom_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* camellia_ofb_custom_encrypt_enhanced(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Set standard IV size if not already set
@@ -229,7 +365,7 @@ unsigned char* camellia_ofb_custom_encrypt(camellia_context_t* context, const un
 }
 
 // Custom Camellia-OFB decryption function with enhanced keystream generation
-unsigned char* camellia_ofb_custom_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+unsigned char* camellia_ofb_custom_decrypt_enhanced(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     // Set standard IV size if not already set

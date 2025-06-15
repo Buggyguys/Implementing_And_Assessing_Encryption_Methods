@@ -146,11 +146,14 @@ gcc ${CFLAGS} -c -o build/aes_implementation.o aes/implementation.c
 
 # Camellia implementation
 echo "Compiling Camellia..."
-echo "Creating placeholder for Camellia implementation"
-mkdir -p camellia
-echo "// Placeholder implementation" > camellia/implementation.c
-echo "#include \"implementation.h\"" >> camellia/implementation.c
-echo "void register_camellia_implementations(implementation_registry_t* registry) {}" >> camellia/implementation.c
+# Compile individual Camellia mode files
+    gcc ${CFLAGS} -c -o build/camellia_common.o camellia/camellia_common.c
+    gcc ${CFLAGS} -c -o build/camellia_key.o camellia/camellia_key.c
+    gcc ${CFLAGS} -c -o build/camellia_cbc.o camellia/camellia_cbc.c
+    gcc ${CFLAGS} -c -o build/camellia_cfb.o camellia/camellia_cfb.c
+    gcc ${CFLAGS} -c -o build/camellia_ofb.o camellia/camellia_ofb.c
+    gcc ${CFLAGS} -c -o build/camellia_ecb.o camellia/camellia_ecb.c
+# Compile main Camellia implementation
 gcc ${CFLAGS} -c -o build/camellia_implementation.o camellia/implementation.c
 
 # ChaCha20 implementation

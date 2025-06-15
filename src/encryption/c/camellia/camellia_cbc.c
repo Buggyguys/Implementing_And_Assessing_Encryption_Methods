@@ -5,190 +5,180 @@
 #include "../include/crypto_utils.h"
 #include "camellia_common.h"
 #include "camellia_cbc.h"
+#include "implementation.h"
 
 #define AUTH_TAG_SIZE 16 // 16 bytes (128 bits) for authentication tag
+#define CAMELLIA_BLOCK_SIZE 16
 
-// Camellia-CBC encryption function with authentication
-unsigned char* camellia_cbc_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    if (!context || !data || data_length <= 0) return NULL;
+// forward declarations for internal functions
+extern void camellia_encrypt_128(const uint8_t* input, uint8_t* output, const uint64_t subkeys[26]);
+extern void camellia_decrypt_128(const uint8_t* input, uint8_t* output, const uint64_t subkeys[26]);
+extern void camellia_key_schedule_128(const uint8_t* key, uint64_t subkeys[26]);
+
+// cbc encryption function with authentication
+unsigned char* camellia_cbc_encrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
     
-    // Calculate the output length (data + IV + tag)
-    // In CBC mode, we need to pad the data to a multiple of the block size
-    int block_size = CAMELLIA_BLOCK_SIZE;
-    int padded_length = ((data_length + block_size - 1) / block_size) * block_size;
+    // set mode to cbc
+    strcpy(context->mode, "CBC");
     
-    // Set standard IV size if not already set
-    if (context->iv_length == 0) {
-        context->iv_length = crypto_get_standard_iv_size("Camellia", "CBC"); // 16 bytes
+    // use main implementation functions
+    if (context->is_custom) {
+        return camellia_custom_encrypt(context, data, data_length, context->key, output_length);
+    } else {
+        return camellia_encrypt(context, data, data_length, context->key, output_length);
     }
-    
-    // Generate IV if not already set
-    if (!context->iv) {
-        context->iv = (unsigned char*)crypto_secure_alloc(context->iv_length);
-        if (!context->iv) {
-            fprintf(stderr, "Error: Could not allocate memory for IV\n");
-            return NULL;
-        }
-        generate_random_bytes(context->iv, context->iv_length);
-    }
-    
-    // Calculate tag size
-    int tag_size = AUTH_TAG_SIZE;
-    
-    // Total output = IV + padded data + tag
-    *output_length = context->iv_length + padded_length + tag_size;
-    
-    // Allocate memory for the output using secure allocation
-    unsigned char* output = (unsigned char*)crypto_secure_alloc(*output_length);
-    if (!output) {
-        fprintf(stderr, "Error: Could not allocate memory for Camellia-CBC encryption output\n");
-        return NULL;
-    }
-    
-    // Structure of output: IV + Ciphertext + Tag
-    
-    // Copy the IV to the output
-    memcpy(output, context->iv, context->iv_length);
-    
-    // For this placeholder, we'll just XOR the data with the key as a simple "encryption"
-    // In a real implementation, you would use the Camellia cipher in CBC mode
-    unsigned char prev_block[CAMELLIA_BLOCK_SIZE];
-    memcpy(prev_block, context->iv, CAMELLIA_BLOCK_SIZE);
-    
-    for (int i = 0; i < data_length; i++) {
-        // XOR with previous ciphertext block (or IV for the first block)
-        unsigned char xored = data[i] ^ prev_block[i % CAMELLIA_BLOCK_SIZE];
-        
-        // XOR with key (simple substitution for placeholder)
-        output[context->iv_length + i] = xored ^ context->key[i % context->key_length];
-        
-        // Update previous block for next iteration
-        prev_block[i % CAMELLIA_BLOCK_SIZE] = output[context->iv_length + i];
-    }
-    
-    // Pad the remaining bytes (if any)
-    for (int i = data_length; i < padded_length; i++) {
-        unsigned char padding_byte = padded_length - data_length;
-        
-        // XOR with previous ciphertext block
-        unsigned char xored = padding_byte ^ prev_block[i % CAMELLIA_BLOCK_SIZE];
-        
-        // XOR with key (simple substitution for placeholder)
-        output[context->iv_length + i] = xored ^ context->key[i % context->key_length];
-        
-        // Update previous block for next iteration
-        prev_block[i % CAMELLIA_BLOCK_SIZE] = output[context->iv_length + i];
-    }
-    
-    // Generate authentication tag for the encrypted data
-    unsigned char* ciphertext = output + context->iv_length;
-    unsigned char* tag = output + context->iv_length + padded_length;
-    
-    if (!crypto_generate_authentication_tag(tag, tag_size, ciphertext, padded_length, 
-                                           context->key, context->key_length)) {
-        fprintf(stderr, "Error: Failed to generate authentication tag\n");
-        crypto_secure_free(output, *output_length);
-        return NULL;
-    }
-    
-    return output;
 }
 
-// Camellia-CBC decryption function with authentication verification
-unsigned char* camellia_cbc_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    if (!context || !data || data_length <= 0) return NULL;
+// cbc decryption function with authentication verification
+unsigned char* camellia_cbc_decrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
     
-    // Set standard IV size if not already set
-    if (context->iv_length == 0) {
-        context->iv_length = crypto_get_standard_iv_size("Camellia", "CBC"); // 16 bytes
+    // set mode to cbc
+    strcpy(context->mode, "CBC");
+    
+    // use main implementation functions
+    if (context->is_custom) {
+        return camellia_custom_decrypt(context, data, data_length, context->key, output_length);
+    } else {
+        return camellia_decrypt(context, data, data_length, context->key, output_length);
     }
+}
+
+// custom cbc encryption function using real block cipher
+unsigned char* camellia_cbc_custom_encrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length == 0) return NULL;
     
-    // Calculate tag size
-    int tag_size = AUTH_TAG_SIZE;
-    
-    // Check if the data is large enough to contain the IV and tag
-    if (data_length < context->iv_length + tag_size) {
-        fprintf(stderr, "Error: Invalid Camellia-CBC ciphertext length\n");
+    // only support 128-bit keys for custom implementation
+    if (context->key_size != 128) {
+        fprintf(stderr, "Custom CBC: Only 128-bit keys supported\n");
         return NULL;
     }
     
-    // Calculate the plaintext length (including padding)
-    int padded_length = data_length - context->iv_length - tag_size;
+    // generate subkeys
+    uint64_t subkeys[26];
+    camellia_key_schedule_128(context->key, subkeys);
     
-    // Allocate memory for the plaintext using secure allocation
-    unsigned char* plaintext = (unsigned char*)crypto_secure_alloc(padded_length);
-    if (!plaintext) {
-        fprintf(stderr, "Error: Could not allocate memory for Camellia-CBC decryption output\n");
-        return NULL;
-    }
-    
-    // Extract the IV, ciphertext and tag from the input data
-    const unsigned char* iv = data;
-    const unsigned char* ciphertext = data + context->iv_length;
-    const unsigned char* tag = data + context->iv_length + padded_length;
-    
-    // Verify the authentication tag first
-    if (!crypto_verify_authentication_tag(tag, tag_size, ciphertext, padded_length, 
-                                        context->key, context->key_length)) {
-        fprintf(stderr, "Error: Authentication tag verification failed. Data may be corrupted or tampered with.\n");
-        crypto_secure_free(plaintext, padded_length);
-        return NULL; // Fail securely on authentication failure
-    }
-    
-    // For this placeholder, we'll just XOR the data with the key as a simple "decryption"
-    // In a real implementation, you would use the Camellia cipher in CBC mode
-    for (int i = 0; i < padded_length; i++) {
-        // XOR with key (simple substitution for placeholder)
-        unsigned char xored = ciphertext[i] ^ context->key[i % context->key_length];
+    // generate iv if not present
+    if (!context->iv) {
+        context->iv_length = 16;
+        context->iv = (unsigned char*)malloc(16);
+        if (!context->iv) return NULL;
         
-        // XOR with previous ciphertext block (or IV for the first block)
-        if (i < CAMELLIA_BLOCK_SIZE) {
-            plaintext[i] = xored ^ iv[i];
-        } else {
-            plaintext[i] = xored ^ ciphertext[i - CAMELLIA_BLOCK_SIZE];
+        // generate random iv
+        for (int i = 0; i < 16; i++) {
+            context->iv[i] = rand() & 0xFF;
         }
     }
     
-    // Check for and remove padding
-    unsigned char padding_byte = plaintext[padded_length - 1];
-    if (padding_byte > 0 && padding_byte <= CAMELLIA_BLOCK_SIZE) {
-        // Verify padding
-        int valid_padding = 1;
-        for (int i = padded_length - padding_byte; i < padded_length; i++) {
-            if (plaintext[i] != padding_byte) {
-                valid_padding = 0;
-                break;
+    // calculate output size (iv + padded data)
+    size_t padded_length = ((data_length + 15) / 16) * 16;
+    size_t total_length = 16 + padded_length;
+    unsigned char* output = (unsigned char*)malloc(total_length);
+    if (!output) return NULL;
+    
+    // copy iv to output
+    memcpy(output, context->iv, 16);
+    
+    // previous block starts with iv
+    uint8_t prev_block[16];
+    memcpy(prev_block, context->iv, 16);
+    
+    // encrypt block by block
+    for (size_t i = 0; i < data_length; i += 16) {
+        uint8_t block[16];
+        memset(block, 0, 16);
+        
+        size_t copy_len = (data_length - i < 16) ? data_length - i : 16;
+        memcpy(block, data + i, copy_len);
+        
+        // pkcs#7 padding for last block
+        if (copy_len < 16) {
+            uint8_t pad_value = 16 - copy_len;
+            for (size_t j = copy_len; j < 16; j++) {
+                block[j] = pad_value;
             }
         }
         
-        if (valid_padding) {
-            padded_length -= padding_byte;
+        // xor with previous block (cbc mode)
+        for (int j = 0; j < 16; j++) {
+            block[j] ^= prev_block[j];
         }
+        
+        // encrypt the xored block
+        camellia_encrypt_128(block, output + 16 + i, subkeys);
+        
+        // update previous block
+        memcpy(prev_block, output + 16 + i, 16);
     }
     
-    *output_length = padded_length;
+    *output_length = total_length;
+    return output;
+}
+
+// custom cbc decryption function using real block cipher
+unsigned char* camellia_cbc_custom_decrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
+    if (!context || !data || data_length < 32 || (data_length - 16) % 16 != 0) return NULL;
     
-    return plaintext;
-}
-
-// Custom Camellia-CBC encryption function
-unsigned char* camellia_cbc_custom_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    // For now, the custom implementation just calls the standard one
-    return camellia_cbc_encrypt(context, data, data_length, output_length);
-}
-
-// Custom Camellia-CBC decryption function
-unsigned char* camellia_cbc_custom_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
-    // For now, the custom implementation just calls the standard one
-    return camellia_cbc_decrypt(context, data, data_length, output_length);
+    // only support 128-bit keys for custom implementation
+    if (context->key_size != 128) {
+        fprintf(stderr, "Custom CBC: Only 128-bit keys supported\n");
+        return NULL;
+    }
+    
+    // generate subkeys
+    uint64_t subkeys[26];
+    camellia_key_schedule_128(context->key, subkeys);
+    
+    // extract iv
+    uint8_t iv[16];
+    memcpy(iv, data, 16);
+    
+    size_t ciphertext_length = data_length - 16;
+    unsigned char* output = (unsigned char*)malloc(ciphertext_length);
+    if (!output) return NULL;
+    
+    // previous block starts with iv
+    uint8_t prev_block[16];
+    memcpy(prev_block, iv, 16);
+    
+    // decrypt block by block
+    for (size_t i = 0; i < ciphertext_length; i += 16) {
+        uint8_t decrypted_block[16];
+        
+        // decrypt the block
+        camellia_decrypt_128(data + 16 + i, decrypted_block, subkeys);
+        
+        // xor with previous block (cbc mode)
+        for (int j = 0; j < 16; j++) {
+            output[i + j] = decrypted_block[j] ^ prev_block[j];
+        }
+        
+        // update previous block
+        memcpy(prev_block, data + 16 + i, 16);
+    }
+    
+    // remove pkcs#7 padding
+    if (ciphertext_length > 0) {
+        uint8_t pad_value = output[ciphertext_length - 1];
+        if (pad_value <= 16) {
+            *output_length = ciphertext_length - pad_value;
+        } else {
+            *output_length = ciphertext_length;
+        }
+    } else {
+        *output_length = 0;
+    }
+    
+    return output;
 }
 
 #ifdef USE_OPENSSL
 #include <openssl/evp.h>
 #include <openssl/err.h>
 
-// OpenSSL Camellia-CBC encryption function
-unsigned char* camellia_cbc_openssl_encrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+// openssl cbc encryption function
+unsigned char* camellia_cbc_openssl_encrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     EVP_CIPHER_CTX *ctx;
@@ -196,29 +186,29 @@ unsigned char* camellia_cbc_openssl_encrypt(camellia_context_t* context, const u
     int ciphertext_len;
     unsigned char *ciphertext;
     
-    // Calculate the output length (data + IV + padding)
+    // calculate output length (data + iv + padding)
     int block_size = CAMELLIA_BLOCK_SIZE;
     int padded_length = ((data_length + block_size - 1) / block_size) * block_size;
     *output_length = padded_length + context->iv_length;
     
-    // Allocate memory for the output
+    // allocate memory for output
     ciphertext = (unsigned char*)malloc(*output_length);
     if (!ciphertext) {
-        fprintf(stderr, "Error: Could not allocate memory for Camellia-CBC encryption output\n");
+        fprintf(stderr, "Error: Could not allocate memory for CBC encryption output\n");
         return NULL;
     }
     
-    // Copy the IV to the output
+    // copy the iv to the output
     memcpy(ciphertext, context->iv, context->iv_length);
     
-    // Create and initialize the context
+    // create and initialize the context
     if(!(ctx = EVP_CIPHER_CTX_new())) {
         fprintf(stderr, "Error: Could not create OpenSSL cipher context\n");
         free(ciphertext);
         return NULL;
     }
     
-    // Initialize the encryption operation
+    // initialize the encryption operation
     const EVP_CIPHER *cipher = NULL;
     switch(context->key_size) {
         case 128:
@@ -244,7 +234,7 @@ unsigned char* camellia_cbc_openssl_encrypt(camellia_context_t* context, const u
         return NULL;
     }
     
-    // Provide the message to be encrypted, and obtain the encrypted output
+    // provide the message to be encrypted, and obtain the encrypted output
     if(1 != EVP_EncryptUpdate(ctx, ciphertext + context->iv_length, &len, data, data_length)) {
         fprintf(stderr, "Error: Could not update OpenSSL encryption\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -253,7 +243,7 @@ unsigned char* camellia_cbc_openssl_encrypt(camellia_context_t* context, const u
     }
     ciphertext_len = len;
     
-    // Finalize the encryption
+    // finalize the encryption
     if(1 != EVP_EncryptFinal_ex(ctx, ciphertext + context->iv_length + len, &len)) {
         fprintf(stderr, "Error: Could not finalize OpenSSL encryption\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -262,17 +252,17 @@ unsigned char* camellia_cbc_openssl_encrypt(camellia_context_t* context, const u
     }
     ciphertext_len += len;
     
-    // Clean up
+    // clean up
     EVP_CIPHER_CTX_free(ctx);
     
-    // Update the output length
+    // update the output length
     *output_length = context->iv_length + ciphertext_len;
     
     return ciphertext;
 }
 
-// OpenSSL Camellia-CBC decryption function
-unsigned char* camellia_cbc_openssl_decrypt(camellia_context_t* context, const unsigned char* data, int data_length, int* output_length) {
+// openssl cbc decryption function
+unsigned char* camellia_cbc_openssl_decrypt(camellia_context_t* context, const unsigned char* data, size_t data_length, size_t* output_length) {
     if (!context || !data || data_length <= 0) return NULL;
     
     EVP_CIPHER_CTX *ctx;
@@ -280,30 +270,30 @@ unsigned char* camellia_cbc_openssl_decrypt(camellia_context_t* context, const u
     int plaintext_len;
     unsigned char *plaintext;
     
-    // Check if the data is large enough to contain the IV
+    // check if the data is large enough to contain the iv
     if (data_length < context->iv_length) {
         fprintf(stderr, "Error: Invalid Camellia-CBC ciphertext length\n");
         return NULL;
     }
     
-    // Calculate the plaintext length (including padding)
+    // calculate the plaintext length (including padding)
     int padded_length = data_length - context->iv_length;
     
-    // Allocate memory for the plaintext
+    // allocate memory for the plaintext
     plaintext = (unsigned char*)malloc(padded_length);
     if (!plaintext) {
-        fprintf(stderr, "Error: Could not allocate memory for Camellia-CBC decryption output\n");
+        fprintf(stderr, "Error: Could not allocate memory for CBC decryption output\n");
         return NULL;
     }
     
-    // Create and initialize the context
+    // create and initialize the context
     if(!(ctx = EVP_CIPHER_CTX_new())) {
         fprintf(stderr, "Error: Could not create OpenSSL cipher context\n");
         free(plaintext);
         return NULL;
     }
     
-    // Initialize the decryption operation
+    // initialize the decryption operation
     const EVP_CIPHER *cipher = NULL;
     switch(context->key_size) {
         case 128:
@@ -329,7 +319,7 @@ unsigned char* camellia_cbc_openssl_decrypt(camellia_context_t* context, const u
         return NULL;
     }
     
-    // Provide the message to be decrypted, and obtain the plaintext output
+    // provide the message to be decrypted, and obtain the plaintext output
     if(1 != EVP_DecryptUpdate(ctx, plaintext, &len, data + context->iv_length, padded_length)) {
         fprintf(stderr, "Error: Could not update OpenSSL decryption\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -338,7 +328,7 @@ unsigned char* camellia_cbc_openssl_decrypt(camellia_context_t* context, const u
     }
     plaintext_len = len;
     
-    // Finalize the decryption
+    // finalize the decryption
     if(1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len)) {
         fprintf(stderr, "Error: Could not finalize OpenSSL decryption (padding error)\n");
         EVP_CIPHER_CTX_free(ctx);
@@ -347,10 +337,10 @@ unsigned char* camellia_cbc_openssl_decrypt(camellia_context_t* context, const u
     }
     plaintext_len += len;
     
-    // Clean up
+    // clean up
     EVP_CIPHER_CTX_free(ctx);
     
-    // Update the output length
+    // update the output length
     *output_length = plaintext_len;
     
     return plaintext;

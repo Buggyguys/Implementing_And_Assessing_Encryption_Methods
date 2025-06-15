@@ -3,9 +3,13 @@
 
 #include "implementation.h"
 
-// Key generation functions
+// key generation functions
 unsigned char* camellia_generate_key(void* context, int* key_length);
 unsigned char* camellia_custom_generate_key(void* context, int* key_length);
+
+#ifdef USE_OPENSSL
+unsigned char* camellia_openssl_generate_key(void* context, int* key_length);
+#endif
 
 // Note: Key size specific functions are handled internally by the main generate_key function
 
