@@ -206,21 +206,6 @@ if [ -f "ecc/ecc_common.c" ]; then
     gcc ${CFLAGS} -c -o build/ecc_common.o ecc/ecc_common.c
 fi
 
-if [ -f "ecc/ecc_key.c" ]; then
-    echo "Compiling ECC key management..."
-    gcc ${CFLAGS} -c -o build/ecc_key.o ecc/ecc_key.c
-fi
-
-if [ -f "ecc/encryption_ecc.c" ]; then
-    echo "Compiling ECC encryption functions..."
-    gcc ${CFLAGS} -c -o build/encryption_ecc.o ecc/encryption_ecc.c
-fi
-
-if [ -f "ecc/decryption_ecc.c" ]; then
-    echo "Compiling ECC decryption functions..."
-    gcc ${CFLAGS} -c -o build/decryption_ecc.o ecc/decryption_ecc.c
-fi
-
 # Compile the core with all implementations
 echo "Compiling C core..."
 gcc -Wall -O2 \
@@ -253,9 +238,6 @@ gcc -Wall -O2 \
     $([ -f build/rsa_common.o ] && echo "build/rsa_common.o") \
     build/ecc_implementation.o \
     $([ -f build/ecc_common.o ] && echo "build/ecc_common.o") \
-    $([ -f build/ecc_key.o ] && echo "build/ecc_key.o") \
-    $([ -f build/encryption_ecc.o ] && echo "build/encryption_ecc.o") \
-    $([ -f build/decryption_ecc.o ] && echo "build/decryption_ecc.o") \
     -lcrypto -lssl -ldl -lpthread
 
 # Create a symlink in the current directory for backward compatibility
